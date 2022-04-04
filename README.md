@@ -30,3 +30,5 @@ This is what I wrote in the opening message at the AtariAge thread: *The microco
 *The most difficult bit in this has been setting up the software properly so that both cores operate properly and the toolchain works. These chips are very complex, with a huge amount of on-chip peripherals. Still, the "bus server" program running on the M0 core is less than 4K bytes in size. I have setup things so that the M4F is the master processor, it configures everything and then boots the M0. The M0 is running from RAM for maximum performance, with interrupts disabled.*
 
 I have made multiple board revisions after the initial prototype, and the current version (StrangeCart V2 rev B) is a two chip design: in addition to the MCU I have added a 16 megabyte serial flash chip as a mass storage chip.
+
+![Architecture picture](https://github.com/Speccery/StrangeCart-Doc/blob/main/StrangeCart%20Architecture.jpg)
