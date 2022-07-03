@@ -3,6 +3,14 @@ StrangeCart project public documentation.
 
 Please see the [Wiki](https://github.com/Speccery/StrangeCart-Doc/wiki) for more information.
 
+## Folders
+
+| Directory | Contents |
+| --------- | -------- |
+| firmware  | Firmware releases |
+| src       | Source code to flash_creator program used to build cartridge image collections. |
+| mm        | Modified MiniMemory cartridge, used to support intregration to TI BASIC |
+
 ## Discussion thread
 The StrangeCart project started way back in May 2020, when I started this discussion thread:
 
