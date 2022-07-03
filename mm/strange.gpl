@@ -1,0 +1,651 @@
+*--------------------------------------
+* Strange.gpl
+* Testing StrangeCart features with a GPL program.
+*--------------------------------------
+* EP 2021-07-16
+
+* DSR for StrangeCart Flash storage
+* Code copied from handler of MINIMEM, EXPMEM1 and EXPMEM2 handling.
+* For now just let's try to handle SAVE in a specific way.
+* The other handlers use these locations:
+*   835A  RAM address     (e.g. minimem SRAM 7000)
+*   835C  Length of area  (e.g. minimem SRAM FF8)
+* From Thierry's documentation of scratchpad: http://www.unige.ch/medecine/nouspikel/ti99/padram.htm
+* 834A..8352 PAB copy area
+* 8354 DSRSIZ  Size of DSR name
+* 8356 DSRNAM  Pointer DSR name for link
+* 8358         is not documented
+* 835C ARG     is floating point argument (8 bytes)
+
+
+* The GPL side of this cartridge uses the following locations:
+* Note the byte order here adheres to TMS9900, big endian, high byte in the lower address
+TMS9900_CMD     equ >7FF0   ;// Command from TMS9900 to ARM
+WAIT_FLAG       equ >7FF2   ;// The TMS9900 waits for this to change on command execution.
+FNAME_LEN       equ >7010   ;// Length of the filename
+SAVE_LEN        equ >7012   ;// Length of the Basic program to save
+BLK_COUNT       equ >7014   ;// This is the block count for saving/loading from TMS9900
+VDP_PGM_START   equ >7016   ;// Start address of Basic program in VDP memory.
+NAME_STR        equ >7018   ;// Filename starts from here.
+FILE_BUFFER     equ >7080   ;// Here we have 128 data bytes from the TMS9900
+ISRCOUNT        equ >7FEC   ;// Counts interrupts on the TMS9900 side
+* VDP transfer
+VDP_BUF         equ >7800   ;// VDP 32*24 buffer
+VDP_BUF2        equ >7B00   ;// working buffer
+VDP_DESTA       equ >7FE0   ;// VDP Destination address
+SYS_SRC_A       equ >7FE2   ;// Source address for data transfer
+SYS_SRC_END     equ >7FE4   ;// End of data address 
+KSCAN_FLAG      equ >7FE6   ;// Keyscan flag byte 
+KSCAN_KEY       equ >7FE7   ;// Keyscan key byte 
+* GPL locations for scartchpad
+GPL_CURTOKEN    equ >8342
+GPL_FAC         equ >834A       ; GPL Floating point acc base, 8 bytes of space
+GPL_FAC_P2      equ >834C       ; second word in the above
+GPL_PAB         equ >834A       ; PAB copy area, overlaid with the above, 834A..8354
+GPL_PAB_P2      equ >834C
+GPL_PAB_P3      equ >834E
+GPL_PAB_P4      equ >8350
+GPL_DSRSIZ      equ >8354       ; Size of DSR name
+GPL_DSRNAM      equ >8356       ; 
+GW0             equ >8358       ; Seems to be memory word which is spare and used for stuff even in console GROM
+GW1             equ >835A       ; ditto
+GPL_ARG         equ >835C       ; Floating point arg, 8 bytes of space
+CCHA            equ >837D       ; GPL Character at current screen position
+CROW            equ >837E       ; GPL Current row
+CCOL            equ >837F       ; GPL Current column
+
+
+*
+* GPL instructions: 
+*   BS jumps to a certain address if condition bit is set.
+*   CH S,D and DCH S,D: compares source and dest and set condition when dest is logically greater than source
+*
+GSCMEM DST  @GPL_DSRNAM,@GW0    points at end of DSR name
+      DSUB  @GPL_DSRSIZ,@GW0    now point at beginning of name
+      MOVE  >000A,V@>FFF6(@>58),@GPL_FAC  copy PAB into scratch-pad memory
+      AND   >1F,V@>FFF7(@>58)        clear error flags
+      CH    >09,@GPL_FAC             opcode
+      BS    G@G61D8          illegal if >9
+      CASE  @GPL_FAC
+      BR    G@G61E1          0: open
+      BR    G@G6251          1: close
+      BR    G@G6253          2: read
+      BR    G@G62C2          3: write
+      BR    G@G634E          4: rewind
+      BR    G@GSCLOAD        5: old
+      BR    G@GSCSAVE        6: save 
+      BR    G@GSCDELETE      7: delete
+      BR    G@G61D8          8: scratch record -> illegal opcode
+      BR    G@G63C3          9: status
+
+*
+*------------------------------------
+* Opcode 6: Save
+*------------------------------------
+* Example: basic program:
+*     10 print 1
+* has been entered and then we do SAVE MINIMEM.HELLO
+* Scratchpad has:
+* 8320: xx xx seems to be our screen pointer.
+* 834A: 06 00 37 C6 00 00   PAB begins. 37C6 is save address.
+* 834A-8352: FAC (floating point accumulator)
+* 834A-8354: PAB copy area
+* 8350: 00 12 60 0D         PAB ends at 8353. 0012 is length.
+* 8354: 00 07 length
+* 8356: 07 11 end of name. points to .HELLO in VDP RAM.
+* 8358: 07 0A beginning of name. points to MINIMEM.HELLO in VDP RAM.
+* 835A: 70 00 Minimem SRAM address
+* 835C: 0F F7 Minimem SRAM size
+* Let's remember that the the byte before the name is the length of the name.
+*
+* 832C: xx xx ; Pointer to current token (or text) in the current statement
+* 832E: 37 D4 ; Current line entry in the line number table
+* 8330: 37 CE ; Bottom of the line number table, which is just above symbol table
+* 8332: 37 D1 ; points to the top of the line number table, just below the statement list.
+* 833E: 00 00 ; Bottom of symbol table
+* 8370: 37 D7 ; points to the last byte in the statement list.
+*
+* VDP RAM:
+* 37C6: 00 1F 37 D1 37 CE 37 D7 ; This is some header. 
+*   EPEP 37D1 is line number table top. 37CE is line number table bottom. 37D7 last byte of statement list.
+*   EPEP but what is the beginning 001F?
+* 37CE: 00 0A 37 D3             ; line number table [000A=line number, 37D3 address of line]
+* 37D2: 05 9C C8 01             ; 05=length of line, 9C=print token, C8=unquoted string, 01=length of string
+* 37D6: 31 00                   ; 31=ASCII code of 1, 00 = end of statement
+* 37D8:       AA 3F FF 11 03 00 ; just stuff after the statement list
+*
+* Note of some GROM routines to check out:
+* GROM 4D00 scroll routine
+* GROM 2D99 Error routine, fetches pointer to message into 8376 & 77
+* 
+********* LASERGATE *******************************************************
+* Checking the save data of the LASERGATE basic program:
+* 20010000 1F 49 31 86-2E CF 3F FF-07 26 32 31-07 1C 32 34 .I1...?..&21..24
+* With the same logic as above:
+* 1F49 = ?
+* 3186 = Line number table top ?
+* 2ECF = Line number table bottom, points to 07 26 32 31
+* 3FFF = last byte of statement list?
+* The VDP memory pointer is 0x2EC7, this is where the Basic program starts from.
+* So 2EC7 is the address of 1F above (in ARM 20010000).
+* 2ECF is 8 bytes later, and the start of line number table.
+* 0726 (dec 1830) 3231, line data at 3231 - last line of program: 1830 RETURN 
+* 071C (dec 1820) 3234, line data at 3234 - 2nd last line: PRINT ::
+*
+
+GSCSAVE 
+** Now modifying this for StrangeCart. First we store to FNAME_LEN the filename we've got.
+        CEQ  46,V*GPL_DSRNAM            Do we have a period?
+        BR   G@G61C0                    No, memory full (bogus message)
+        DINC @GPL_DSRNAM                Point to first character of name.
+        DST  @GW0,@GW1                  copy pointer to start of name (in VDP RAM)
+        DDEC @GW1                       dec by one, point to length byte
+        ST   V*GW1,@GPL_ARG+1           Low byte of name length 
+        CLR  @GPL_ARG                   clear high byte of name length
+        DST  @GPL_ARG,@FNAME_LEN        Copy length of filename to 7010 (word)
+        DST  @>8350,@SAVE_LEN           Copy length of Basic program to 7012
+        CLR  @BLK_COUNT                 Clear block count (0 = name block)
+        DST  @GPL_FAC_P2,@VDP_PGM_START  Copy VDP pointer, Start of BASIC program
+        MOVE @GPL_ARG,V*GW0,@NAME_STR   Copy name (device and name to 7018)
+
+        DST @GPL_FAC_P2,@GW1            Copy VDP pointer to a safe place so we can increment it.
+
+* Next copy first 128 bytes of program to FILE_BUFFER.
+GBKCOPY MOVE >80,V*GW1,@FILE_BUFFER
+* Signal StrangeCart that data is there.
+        CLR  @WAIT_FLAG                 Clear flag, wait for StrangeCart
+        ST   >53,@TMS9900_CMD           >53 = 'S', signal strangeCart data ready to go.
+* Wait for flag to become non-zero
+GSCWAIT: 
+        CEQ  >00,@WAIT_FLAG
+        BS   GSCWAIT
+* Perfect, move to next block.
+        DINC @BLK_COUNT
+        DADD >80,@GW1                   Advance VDP memory pointer, the source pointer.
+        DSUB >80,@>8350                 Decrement size.
+        DCGT >0,@>8350                  Is 0 greater than decremented size?            
+        BS   GBKCOPY                    No -> continue copying.
+* Now we are done.
+        DST  @SAVE_LEN,@>8350           Restore program length. Not sure if this is needed.
+        ST    >45,@TMS9900_CMD          Write 'E', end of save operation.                
+        B   G@G61DE
+
+*
+*------------------------------------
+* Opcode 5: Load
+*------------------------------------
+** G6365  DCEQ  >5AA5,@>0000(@>5A)    check if flag is present
+**        BR    G@G61D0               "file error"
+**        CEQ   >FF,@>0002(@>5A)      flag for "program" type
+**        BR    G@G61D0               mismatch: "file error"
+**        DST   @>835A,@>834A         memory address
+**        DADD  >0008,@>834A          skip header
+**        DCH   @>8350,@>0004(@>5A)   check max # of bytes to load
+**        BS    G@G61C0               too big: memory full
+**        DST   @>0004(@>5A),@>834E   write ptr (i.e. eof offset)
+**        MOVE  @>834E,@>0000(@>4A),V*>834C  copy to dat buffer area
+**        BR    G@G61DE               return to caller
+**
+** The above in pseudocode (PAB has been copied to 834A before):
+** PAB part in scratchpad
+**      834A PAB Byte 4: I/O Op Code for DSR
+**      834B PAB Byte 5: Flag byte
+**      834C PAB Byte 6,7: Pointer to buffer (in VDP RAM)
+**      834E PAB Byte 8: Maximum length of data block
+**      834F PAB Byte 9: Length of actual data block
+**      8350 PAB Byte 10,11: Number of data block (only for relative files) 
+**      8352 PAB Byte 12: Screen offset
+**      8353 PAB Byte 13: Length of file name
+**           PAB Byte 14: File name
+** File header in RAM for normal minimemory saved files:
+**      7000 word >5AA5 init flag
+**      7002 word >FFXX program indicator
+**      7004 word Lenght of file
+**      7006 word ?
+**      7008 program data starts here
+**
+** DCH Description: Compares source and destination and sets the condition-Bit when the destination is logically greater than the source.
+**
+**      uint16_t *p = 0x7000;   // p = pointer at >835A 
+**      uint16_t len = p[2];
+**      if(*p != 0x5AA5)                goto G@G61D0;
+**      if(*(uint8_t *)&p[1] != 0xFF)   goto G@G61D0;
+**      if(pab.size < len)              goto G@G61D0; // Here I guess p[2] is file size and pab.size is available space in VDP RAM
+**      memcpy_to_vdp_ram(pab.buffer, &p[4], len);
+
+GSCLOAD 
+* OK we need to move the filename to somewhere where StrangeCart can see it.
+*        ALL >20
+*        FMT
+*        SCRO >60
+*        COL >02
+*        ROW >02
+*        HTEX 'STRANGECART FILE LOAD'
+*        COL >02
+*        ROW+ >01
+*        HTEX 'AGAIN'
+*        FEND
+        DINC @GPL_DSRNAM                Point to first character of name.
+        DST  @GW0,@GW1                  copy pointer to start of name (in VDP RAM)
+        DDEC @GW1                       dec by one, point to length byte
+        ST   V*GW1,@GPL_ARG+1           Low byte of name length 
+        CLR  @GPL_ARG                   clear high byte of name length
+        DST  @GPL_ARG,@FNAME_LEN        copy length of filename to 7010 (word)
+        DST  @>8350,@SAVE_LEN           Make the length visible (is this the free VDP RAM?)
+        DST  @GPL_FAC_P2,@VDP_PGM_START  Copy VDP pointer, Start of BASIC program
+        DCLR @BLK_COUNT                 Clear block count (0 = name block)
+        MOVE @GPL_ARG,V*GW0,@NAME_STR   Copy name to where strangecart can see it (device and name to 7018)
+* Wait for flag to become non-zero      
+        DST  VDP_BUF2+2,@GPL_ARG+2        DEBUG Setup pointer to VDP_BUF2+2
+        DST  WAIT_FLAG,@GPL_ARG+4       Pointer to Wait Flag
+* Signal to StrangeCart that filename is there.
+        CLR  @WAIT_FLAG 
+        ST   >00,@WAIT_FLAG             Clear wait flag
+        CEQ  >00,@WAIT_FLAG
+        BS   __OKYES
+        ALL  >20
+        FMT
+        SCRO >60
+        COL >02
+        ROW >04
+        HTEX 'WAIT FLAG NOT ZERO!'
+        FEND
+__OKYES
+        ST   'O',@TMS9900_CMD         Issue 'O' command to OLD a file.
+        ST   @WAIT_FLAG,@VDP_BUF2+>80   DEBUG
+GSCLWAIT:
+        ST    @WAIT_FLAG,@0(GPL_ARG+2)  DEBUG Debug store wait flag history
+        DINC  @GPL_ARG+2                DEBUG ditto
+        CEQ  >00,@0(GPL_ARG+4)          ;;; @WAIT_FLAG
+        BS   GSCLWAIT        
+
+        DST   @SAVE_LEN,@0(GPL_ARG+2)   DEBUG
+        ST    @WAIT_FLAG,@2(GPL_ARG+2)  DEBUG store last one Debug store wait flag history
+        ST   'X',@3(GPL_ARG+2)          DEBUG
+        DST  @GPL_ARG+2,@VDP_BUF2       DEBUG Final value of pointer.
+        DST  @GPL_ARG+4,@4(GPL_ARG+2)  DEBUG
+* Now we need to check from somewhere if the file open succeeded.
+        DST   @SAVE_LEN,@VDP_DESTA      Copy the save length to another place for debugging.
+        DCEQ  >0000,@SAVE_LEN           Is SAVE_LEN zero?
+        BS    LOAD_ERROR                "Yes, file error"
+* Here save SAVE_LEN was non-zero        
+        DCH   @>8350,@SAVE_LEN
+        BS    LOAD_ERROR                If SAVE_LEN > VDP memsize then error.
+* From here on use the actual SAVE_LEN
+        DST   @SAVE_LEN,@>8350
+        DST   @GPL_PAB_P2,@GW1           Destination in VDP RAM
+* Now enter copy loop, and get the file into VDP memory.
+GLOAD_LOOP:
+        CLR    @WAIT_FLAG
+        ST    'O',@TMS9900_CMD          tell strange cart ready for load block
+GSCLWAIT2:
+        CEQ   >00,@WAIT_FLAG           Wait for WAIT_FLAG to become nonzero
+        BS    GSCLWAIT2
+
+        MOVE  >80,@FILE_BUFFER,V*GW1          Move 128 byte block in place.
+        DINC   @BLK_COUNT
+        DADD  >80,@GW1                   Advance VDP memory pointer, the source pointer.
+        DSUB  >80,@>8350                 Decrement size.
+        DCGT  >0,@>8350                  Is 0 greater than decremented size?            
+        BS    GLOAD_LOOP                 No -> continue copying.
+; We are done.        
+        DST   @SAVE_LEN,@>8350           Mark 8350 with size of the file
+        DST   @SAVE_LEN,@>834E
+        ST    >45,@TMS9900_CMD           Write 'E', end of load operation.
+        B     G@G61DE
+
+LOAD_ERROR:
+; Error exit. Let StrangeCart know this did not work out at TMS9900 end.
+        ST    'e',@TMS9900_CMD
+        B     G@G61D0 
+
+*------------------------------------
+* Skip subprogram name
+*------------------------------------
+GNAMESKIP  
+       CLR   @GPL_FAC
+       ST    V*>832C,@>834B   get current token (subprogram name length)
+       DADD  @GPL_FAC,@>832C    update token ptr
+       DINC  @>832C           plus the size byte itself
+       RTN
+
+       XML   >1B              get next token
+       CEQ   >B7,@GPL_CURTOKEN       is it (?
+       BR    G@G6DA5          no: incorrect statement
+       XML   >1B              get next token
+       RTN
+
+*------------------------------------
+* Opcode 5: delete from StrangeCart
+*------------------------------------
+* Based on my code for the SCSAVE
+GSCDELETE:
+** First we store to FNAME_LEN the filename we've got.
+        CEQ  46,V*GPL_DSRNAM            Do we have a period?
+        BR   G@G61C0                    No, memory full (bogus message)
+        DINC @GPL_DSRNAM                Point to first character of name.
+        DST  @GW0,@GW1                  copy pointer to start of name (in VDP RAM)
+        DDEC @GW1                       dec by one, point to length byte
+        ST   V*GW1,@GPL_ARG+1           Low byte of name length 
+        CLR  @GPL_ARG                   clear high byte of name length
+        DST  @GPL_ARG,@FNAME_LEN        Copy length of filename to 7010 (word)
+        DST  @>8350,@SAVE_LEN           Copy length of Basic program to 7012
+        CLR  @BLK_COUNT                 Clear block count (0 = name block)
+        MOVE @GPL_ARG,V*GW0,@NAME_STR   Copy name (device and name to 7018)
+
+        CLR  @WAIT_FLAG                 Clear flag, wait for StrangeCart
+        ST   'W',@TMS9900_CMD           'W' is Erase, issue command to StrangeCart
+* Wait for flag to become non-zero
+! 
+        CEQ  >00,@WAIT_FLAG
+        BS   -!
+        DST  @SAVE_LEN,@>8350           Restore program length. Not sure if this is needed.
+        B   G@G61DE
+
+****************************
+* Our listing command "CALL LIST"
+GLIST   CLR     @GW0            Here GW0 is the command indicator for Basic listing.
+
+GLISTER CALL  G@GNAMESKIP     Skip subprogram name in Basic statement
+        XML   >1B             Get next token
+        CEQ   >B7,@GPL_CURTOKEN      is it (  ?
+        BS    G@GLIST_PARAM   Yes, decode it.
+; Here we have list without any parameters. 83
+        DCLR  @GPL_FAC          Clear the parameter
+        DCLR  @GPL_FAC_P2       Clear 834C and 834D in prepration for no parameter
+        MOVE  >1,@GW0,@>834D    Copy listing command (0=basic list, 5=directory listing)
+        XML   >73               Call assembly for listing.
+; GPL_CURTOKEN already has the next token, check that it is zero, end of line.
+        CZ   @GPL_CURTOKEN
+        BR   G@G6DA5          Not zero, issue error.
+        CALL G@>0012          Return to BASIC.
+GLIST_PARAM                   ; We arrive here if there was an open parenthesis.
+        XML   >1B             Get next token.
+        PARSE >B6             parse next parameter (B6 is closed parenthesis)
+        CEQ   >65,@GPL_FAC_P2      Is it a string?
+        BS    G@G6DBE         yes: string number mismatch 
+        XML   >12             no: convert float to integer
+        CEQ   >03,@GPL_DSRSIZ      overflow occured?
+        BS    G@G6DB9         yes: issue error
+        ; Now @GPL_FAC has our integer. Now we can do something.
+        ; Copy the low byte to GPL_FAC_P2 as XML command.
+        MOVE  >1,@>834B,@GPL_FAC_P2
+        ; Copy from GW0 the appropriate listing command. Zero for CALL LIST
+        MOVE  >1,@GW0,@>834D
+        XML   >73              Call assembly to do listing (@834C=zero)
+                               ; >73 returns with Cnd set.
+        B     G@G6749
+
+DISP_MSG  ; Alright let's show a message from GROM!
+        MOVE >07,G@DSTR1,V*>8320
+        DADD  >0007,@>8320    Advance screen positiong by 7.
+        ST   >A2,V@>0020       Write something to the screen, we're here!
+        BR    G@G6749          Check current token for ) and return to Basic.
+
+DSTR1   DATA  >B3B4           'S' & 'T' + 0x60
+        DATA  >B2A1           'R' & 'A'
+        DATA  >AEA7           'N' & 'G'
+        DATA  >A500           'E',00
+
+*****************************************
+* GDIR command, list contents of a drive
+GDIR    ST      5,@GW0
+        BR      G@GLISTER
+
+*****************************************
+* GRAM command, enable GRAM mode.
+* We have one parameter which is needed.
+GRAM    CALL  G@G6530
+        PARSE >B6               Parse until )
+        CEQ   >65,@GPL_FAC_P2   Is it a string?
+        BS    G@G6DBE           yes: string number mismatch 
+        XML   >12               no: convert float to integer
+        CEQ   >03,@GPL_DSRSIZ   overflow occured?
+        BS    G@G6DB9           yes: issue error        
+        ; Now @GPL_FAC has our integer. Now we can do something.
+        ST    >06,@>834D      ; Signal this is CALL GRAM
+        XML   >73             ; Jump to assembly to handle GRAM init command.
+                              ; >73 returns with Cnd set.
+        B     G@G6749
+
+*****************************************
+* The big guy: RUN
+* Let's run a program stored in the memory of the StrangeCart!
+GRUN    CALL  G@GNAMESKIP     Skip subprogram name in Basic statement
+        XML   >1B             Get next token
+        CEQ   >B7,@GPL_CURTOKEN      is it (  ?
+        BS    G@GRUN_PARAM    Yes: decode it.
+        DCLR  @GPL_FAC          No: just set it to zero.      
+        ST    >01,@>834D      ; Signal this is CALL RUN
+        XML   >73             ; Jump to assembly to handle running.
+        CZ   @GPL_CURTOKEN           ; GPL_CURTOKEN already has the next token, check that it is zero, end of line.
+        BR   G@G6DA5          Not zero, issue error.
+        CALL G@>0012          Return to BASIC.
+GRUN_PARAM                    ; If we arrive here we have a parameter
+        XML   >1B             Get next token.
+        PARSE >B6             parse next parameter (B6 is closed parenthesis)
+        CEQ   >65,@GPL_FAC_P2      Is it a string?
+        BS    G@G6DBE         yes: string number mismatch 
+        XML   >12             no: convert float to integer
+        CEQ   >03,@GPL_DSRSIZ      overflow occured?
+        BS    G@G6DB9         yes: issue error
+        ; Now @GPL_FAC has our integer. Now we can do something.
+        ST    >01,@>834D      ; Signal this is CALL RUN
+        XML   >73             ; Jump to assembly to handle running.
+                              ; >73 returns with Cnd set.
+        B     G@G6749
+
+
+*****************************************
+* List the cartridges on StrangeCart
+GCARTS  CALL  G@GNAMESKIP     Skip subprogram name in Basic statement
+        XML   >1B             Get next token
+        CEQ   >00,@GPL_CURTOKEN      is it zero, end of line?
+        BR    G@GCARTS_PARAM  no: check if we have parameter and parse
+        ST    >02,@>834D      Set command 2, CARTS
+        DCLR  @GPL_FAC        Clear parameter, although not used
+        XML   >73             Call machine code to execute
+        CALL G@>0012          Return to BASIC. Line end check made already.
+
+GCARTS_PARAM ;Here we have a parameter. Decode it and load the appropriate cart.
+        CEQ   >B7,@GPL_CURTOKEN      is it (  ?
+        BR    G@G6DA5         No: issue error
+        XML   >1B             Get next token.
+        PARSE >B6             parse next parameter (B6 is closed parenthesis)
+        CEQ   >65,@GPL_FAC_P2      Is it a string?
+        BS    G@G6DBE         yes: string number mismatch 
+        XML   >12             no: convert float to integer
+        CEQ   >03,@GPL_DSRSIZ      overflow occured?
+        BS    G@G6DB9         yes: issue error
+GSEL_CART:
+        ; Now @GPL_FAC has our integer. Now we can do something.
+        ST    >03,@>834D      Set command 3, cart load
+        XML   >73
+        B     G@G6749
+
+*****************************************
+* Wait for VSYNC
+GVSYNC  CALL  G@GNAMESKIP
+        XML   >1B             Get next token
+        CEQ   >00,@GPL_CURTOKEN      is it zero, end of line?
+        BR    G@G6DA5         No, issue error.
+        ST    >04,@>834D      Set command 4, VSYNC
+        XML   >73
+        CALL G@>0012          Return to BASIC. Line end check made already.
+
+
+*****************************************
+* GPL diagnostic program
+GSCDIAG_E DATA GSCPARSEC_E,GSCDIAG         End of program header chain.
+        STRI 'STRANGECART DIAG'
+* Trampoline to launch Parsec
+GSCPARSEC_E DATA >0000,GSCPARSEC
+        STRI 'SELECT PARSEC'
+
+GSCDIAG DST   >0900,@>834A     program entry point
+        CALL  G@>0018          load upper case chars
+        CLR   @>8374           keyboard type = default
+        ST    >7E,@>8373       init subroutine stack
+        DCLR  @>8322           clear error code
+        DCLR  @>8348           clear flags
+        ALL   >20              clear screen
+        FMT
+***        SCRO  >60
+        COL   >02
+        ROW   >02
+        HTEX  'STRANGECART DIAGNOSTICS'
+        ROW+  >01                       ** Move the cursor so that we can show the version.
+        COL   >02
+        FEND
+        CALL  G@GCALCPOS                ; GPL coordinates -> VDP address at >8396
+        MOVE  28,G@GSTR_VER+1,V*>8396   ; Show the version string.
+        DADD  >20,@>8396                ; Move to next line
+        MOVE  28,G@GSTR_INFO+1,V*>8396  ; Show other information.
+        FMT
+        COL   >04
+        ROW+  >03
+        HTEX  '1 ROM READ TEST'
+        COL   >04
+        ROW+  >01
+        HTEX  '2 RAM WRITE TEST'
+        COL   >04
+        ROW+  >01
+        HTEX  '3 RAM READ TEST'
+        COL   >04
+        ROW+  >01
+        HTEX  '4 REDRAW'
+        FEND
+
+GDIAGMAIN       
+        SCAN
+        BR    GDIAGMAIN        wait for the user to press a key
+        CEQ   >0F,@>8375       is it Fctn-9?
+        BR    GDIAGSEL         no
+        EXIT                   yes: reset the TI-99/4A
+ 
+GDIAGSEL   
+        SUB   >31,@>8375       valid inputs are "1" to "3"
+        CHE   >04,@>8375
+        BS    G@GDIAGSEL       invalid: try again
+        CASE  @>8375
+        BR    GDIAG1          "1"
+        BR    GDIAG2          "2"
+        BR    GDIAG3          "3"
+        BR    GSCDIAG         "4"
+
+GDIAG1  
+        FMT 
+        COL   >00
+        ROW+  >02
+        HTEX  '1: '
+        FEND
+* Setup two pointers, one for GROM table and another for ROM table.
+ROMBYT  equ GPL_FAC+1
+GROMBYT equ GPL_FAC+2
+
+        DST   >6F00,@GW0
+        DST   GDIAGROM_REF,@GW1
+        CLR   @GPL_FAC                  ; Byte counter (1 byte)
+!
+        ST    @0(GW0),@ROMBYT           ; Read byte from ROM 
+        MOVE  1,G@0(GW1),@GROMBYT       ; Read byte from GROM
+        CEQ   @ROMBYT,@GROMBYT          ; Do they match?
+        BR    GDIAG1ERR                 ; No, error.
+        DINC  @GW0                      ; inc ROM pointer
+        DINC  @GW1                      ; inc GROM pointer
+        DEC   @GPL_FAC                  ; DEC byte counter.
+        BR    -!                        ; All compared? If no, jump back. 
+        FMT 
+**        COL   >02
+**        ROW+  >01
+        HTEX  'ROM READ TEST OK'
+        FEND
+        BR    GDIAGMAIN
+
+GDIAG1ERR:  ; Comparison error.
+        FMT
+**        COL   >00
+**        ROW+  >01 
+        HTEX  'ERROR @6F'
+        FEND 
+        ST    @GW0+1,@>8390             ; Copy low byte of address in ROM
+        ST    @ROMBYT,@>8391            ; Copy data which was read from ROM.
+        CALL  G@G7456                   ; Convert integer to hex. Result string in >8392-95.
+        CALL  G@GCALCPOS                ; GPL coordinates -> VDP address at >8396
+        MOVE  2,@>8392,V*>8396          ; Show ROM offset
+        DADD  3,@>8396
+        MOVE  2,G@GSTR_RD+1,V*>8396       ; Show 'RD'
+        DADD  3,@>8396
+        MOVE  2,@>8394,V*>8396          ; Show data read from ROM
+        DADD  3,@>8396
+        MOVE  8,G@GSTR_EXPECTED+1,V*>8396  ; Show 'EXPECTED'
+        DADD  9,@>8396
+        ST    @GROMBYT,@>8391
+        CALL  G@G7456                   ; Convert integer to hex. Result string in >8392-95.
+        MOVE  >0002,@>8394,V*>8396      ; Show data read from GROM
+        BR    GDIAGMAIN
+
+GCALCPOS:       ; Calculate screen address from CCOL and CROW to 8396
+        CLR     @>8396
+        ST      @CROW,@>8397
+        DSLL    5,@>8396                ; Word at 8396 = CROW*32
+        ADD     @CCOL,@>8397             ; add in column
+        RTN
+
+GSTR_RD: STRI 'RD'
+GSTR_EXPECTED: STRI 'EXPECTED'
+
+GDIAG2
+        FMT 
+        COL   >02
+        ROW+  >02
+        HTEX  'OPTION 2'
+        FEND
+        BR    GDIAGMAIN
+
+GDIAG3
+        FMT 
+        COL   >02
+        ROW+  >02
+        HTEX  'OPTION 3'
+        FEND
+        BR    GDIAGMAIN
+
+** Contents of last 256 bytes of ROM.
+GDIAGROM_REF:
+        BYTE >00,>00,>00,>00,>00,>00,>00,>00,>00,>00,>00,>00,>00,>00,>55,>54  ;; |..............UT|
+        BYTE >4c,>54,>41,>42,>70,>20,>50,>41,>44,>20,>20,>20,>83,>00,>47,>50  ;; |LTABp PAD   ..GP|
+        BYTE >4c,>57,>53,>20,>83,>e0,>53,>4f,>55,>4e,>44,>20,>84,>00,>56,>44  ;; |LWS .<E0>SOUND ..VD|
+        BYTE >50,>52,>44,>20,>88,>00,>56,>44,>50,>53,>54,>41,>88,>02,>56,>44  ;; |PRD ..VDPSTA..VD|
+        BYTE >50,>57,>44,>20,>8c,>00,>56,>44,>50,>57,>41,>20,>8c,>02,>53,>50  ;; |PWD ..VDPWA ..SP|
+        BYTE >43,>48,>52,>44,>90,>00,>53,>50,>43,>48,>57,>54,>94,>00,>47,>52  ;; |CHRD..SPCHWT..GR|
+        BYTE >4d,>52,>44,>20,>98,>00,>47,>52,>4d,>52,>41,>20,>98,>02,>47,>52  ;; |MRD ..GRMRA ..GR|
+        BYTE >4d,>57,>44,>20,>9c,>00,>47,>52,>4d,>57,>41,>20,>9c,>02,>53,>43  ;; |MWD ..GRMWA ..SC|
+        BYTE >41,>4e,>20,>20,>00,>0e,>58,>4d,>4c,>4c,>4e,>4b,>60,>1c,>4b,>53  ;; |AN  ..XMLLNK`.KS|
+        BYTE >43,>41,>4e,>20,>60,>20,>56,>53,>42,>57,>20,>20,>60,>24,>56,>4d  ;; |CAN ` VSBW  `$VM|
+        BYTE >42,>57,>20,>20,>60,>28,>56,>53,>42,>52,>20,>20,>60,>2c,>56,>4d  ;; |BW  `(VSBR  `,VM|
+        BYTE >42,>52,>20,>20,>60,>30,>56,>57,>54,>52,>20,>20,>60,>34,>44,>53  ;; |BR  `0VWTR  `4DS|
+        BYTE >52,>4c,>4e,>4b,>60,>38,>4c,>4f,>41,>44,>45,>52,>60,>3c,>47,>50  ;; |RLNK`8LOADER`<GP|
+        BYTE >4c,>4c,>4e,>4b,>60,>18,>4e,>55,>4d,>41,>53,>47,>60,>40,>4e,>55  ;; |LLNK`.NUMASG`@NU|
+        BYTE >4d,>52,>45,>46,>60,>44,>53,>54,>52,>41,>53,>47,>60,>48,>53,>54  ;; |MREF`DSTRASG`HST|
+        BYTE >52,>52,>45,>46,>60,>4c,>45,>52,>52,>20,>20,>20,>60,>50,>fb,>4c  ;; |RREF`LERR   `P<FB>L|
+
+GSCPARSEC:
+        ; Select Parsec cartridge as a shorthand without going through menus or anything.
+        DST >0006,@GPL_FAC      ; Select Parsec
+        BR  G@GSEL_CART
+
+* Info string at address 7FC0 in the GROM space.
+* First byte length. Payload 28 bytes.
+        BSS >7FC0-$
+GSTR_INFO:
+        STRI '1234567890123456789012345678'
+* Version string at address 7FE0 in the GROM space.
+        BSS >7FE0-$
+GSTR_VER:        
+* Note that the STRI command puts the length of the string into the very first byte.
+*             0123456789ABCDEF0123456789AB
+        STRI 'FEB 14 2022 12:00'
+
+** 
+**

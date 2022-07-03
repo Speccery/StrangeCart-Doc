@@ -1,0 +1,675 @@
+*----------------------------------------
+* CHARPAT returns the pattern of a character as a hex string
+*----------------------------------------
+G675F  CALL  G@G6530          skip subprogram name (CHARPAT)
+G6762  PARSE >B6              parse Basic statement for parameters
+       CEQ   >65,@>834C       string param?
+       BS    G@G6DBE          yes: error (should be char #)
+       XML   >12              convert float to interger
+       CEQ   >03,@>8354       overflow occured?
+       BS    G@G6DB9          yes: error
+* EPEP DCGTE->DCGE      DCGTE >0020,@>834A     valid chars are 32-159
+       DCGE  >0020,@>834A     
+       BR    G@G6DC3          lower than 32: error
+       DCGT  >009F,@>834A
+       BS    G@G6DC3          higher than 159: error
+       DSLL  >0003,@>834A     8 bytes per char pattern
+       DST   >0300,@>8310     >60*8 to compensate for Basic bias
+       DADD  @>834A,@>8310    points at the pattern
+       DST   >0010,@>830C     we'll need 16 bytes
+       CALL  G@>0038          make room for string
+       DST   @>831C,@>8312    save pointer to assigned space
+       ST    >08,@>8304       byte counter
+G6794  ST    V*>8310,@>8300   get 1 char
+       DSRL  >0004,@>8300     keep only first nibble
+       ADD   >30,@>8300       make it a digit
+       CGT   >39,@>8300       greater than 9 ?
+       BR    G@G67A7          no
+       ADD   >07,@>8300       yes: make it a hex digit A-F
+G67A7  SRL   >04,@>8301       the second nibble was shifted in here
+       ADD   >30,@>8301       make it a digit
+       CGT   >39,@>8301       greater than 9 ?
+       BR    G@G67B5          no
+       ADD   >07,@>8301       yes: make it a hex digit A-F
+G67B5  DST   @>8300,V*>8312   save those two digits in the string
+       DINC  @>8310           next charpat byte
+       DINCT @>8312           next pair of digits
+       DEC   @>8304           more bytes to come?
+       BR    G@G6794          yes
+       XML   >1B              no: get next token
+       CHE   >80,@>8342       reserved word?
+       BS    G@G6DA5          yes: error (we need a string variable now)
+       XML   >13              get entry from symbol table
+       XML   >14              get entry from value stack
+       XML   >17              push it on stack for XML >15
+       CEQ   >65,@>834C       was it a string variable?
+       BR    G@G6DBE          no: error
+       DST   >001C,@>834A     flag for string constant
+       DST   @>831C,@>834E    pointer to our string
+       DST   >0010,@>8350     size of our string
+       XML   >15              assign our string to the variable
+       CEQ   >B3,@>8342       is next token a , ?
+       BR    G@G6749          no: return to Basic
+       XML   >1B              yes: get next token
+       BR    G@G6762          and go on with another char pattern
+*
+*========================================
+* MINIMEM program. Selections from main menu
+*========================================
+*
+*----------------------------------------
+* Option 1: Initialise
+*----------------------------------------
+*
+G67E9  ALL   >20              clear screen
+       DCEQ  >A55A,@>7000     check flag
+       BR    G@G684D          mini-mem was not initialized
+       FMT
+       COL   >02
+       ROW   >02
+       HTEX  '* INITIALIZE MEMORY *'
+       COL+  >0B
+       ROW+  >01
+       HTEX  'MEMORY ALREADY INITIALIZED'
+       COL+  >06
+       HTEX  'HIT "PROC''D" TO CONFIRM'
+       FEND
+G6845  SCAN
+       BR    G@G6845          wait for a key to be pressed
+       CEQ   >0C,@>8375       is it Fctn-6 ?
+       BR    G@G6020          no: back to main menu
+G684D  CALL  G@G64CF          load assembly subroutines, etc
+       BR    G@G6020          back to main menu
+*
+*----------------------------------------
+* Option 2: Load and run
+*----------------------------------------
+G6852  DCLR  @>8348           remove all flags
+       OR    >01,@>8349       set loader flag
+       ALL   >20              clear screen
+       DCEQ  >A55A,@>7000     are assembly routines in memory?
+       BS    G@G6864          yes
+       CALL  G@G64CF          no: load them
+G6864  FMT
+       COL   >02
+       ROW   >02
+       HTEX  '* LOAD AND RUN *'
+       COL+  >10
+       ROW+  >01
+       HTEX  'FILE NAME?'
+       FEND
+G6888  ST    >20,V@>00C2      clear input area
+       MOVE  >003B,V@>00C0,V@>00C1
+       DST   >00C2,@>8320     screen pointer
+       OR    >04,@>8348       flag
+       DST   >1000,@>831C     PAB pointer
+       CALL  G@G6BAF          input a filename, make its PAB
+       DCZ   @>8350           name size = 0 ?
+       BS    G@G68CC          yes: no more files
+       ST    >04,V@>0001(@>1C)     file type DF
+G68AA  DST   @>831C,@>8356    pab ptr
+       DADD  >0009,@>8356     name size ptr
+       XML   >71              call loader
+       BS    G@G6934          an error occured
+       CLOG  >08,@>8348       check flag
+       BR    G@G65C9          return to call LOAD
+       BR    G@G6888          prompt for another filename
+*
+*----------------------------------------
+* Option 3: Run
+*----------------------------------------
+G68BC  ALL   >20              erase screen
+       FMT                    title when entering from option 3
+       COL   >02
+       ROW   >02
+       HTEX  '* RUN *'
+       FEND
+ 
+G68CC  ST    >7E,@>8373       reset the GPL sub stack
+       FMT
+       ROW   >08
+       COL   >02
+       HTEX  'PROGRAM NAME?'
+       FEND
+       DST   >0142,@>8320     screen pointer for input
+       OR    >04,@>8348       set flag
+       CALL  G@G6C19          input program name
+       DCZ   @>8350           name size = 0 ?
+       BS    G@G6907          yes: same as before
+       DST   @>834E,@>8320
+       DCH   >0006,@>8350     name longer than 6 chars?
+       BS    G@G69B4          yes: error
+       ST    >20,@>834A       clear FAC >834A-8351
+       MOVE  >0005,@>834A,@>834B
+       MOVE  @>8350,V*>8320,@>834A        copy name to FAC
+G6907  DCEQ  >A55A,@>7000     are assembly subprograms in memory?
+       BR    G@G6991          no: error
+       CALL  G@G6D22          set VDP for program
+G6912  DCLR  @>8322           reset error code
+       XML   >70              link to program
+       BS    G@G695D          an error occured
+       CLOG  >20,@>8349       check origin flag
+       BS    G@G6927
+       INCT  @>8373           stack ptr
+       DST   G6912,*>8373     place this address on the stack
+       INCT  @>8373           increment pointer
+       RTN                    this will branch at G6912
+ 
+G6927  CLOG  >08,@>8348       check flag
+       BR    G@G673F          return to call LINK
+       CALL  G@G6D0E          VDP setup for module
+       CALL  G@G6A90          display 'press enter...', wait for <enter>
+       BR    G@G6020          return to main menu
+*
+*========================================
+* Subroutines for general use
+*========================================
+ 
+*----------------------------------------
+* Error handling, from MINI MEMORY program
+*----------------------------------------
+G6934  CALL  G@G6976          set VDP for cartridge
+       CHE   >08,@>8322       is error code an I/O error?
+       BR    G@G69CD          yes
+       SUB   >08,@>8322       no
+       CH    >05,@>8322       code above 13?
+       BS    G@G6955          yes
+       CALL  G@G69FC          close all files
+       CASE  @>8322           announce errors 8-13
+       BR    G@G698A
+       BR    G@G6983
+       BR    G@G6998
+       BR    G@G699F
+       BR    G@G69A6
+       BR    G@G69AD
+ 
+G6955  CLOG  >01,@>8349       check flag
+       BR    G@G6852          back to 'load and run' option
+       CALL  G@G6A19          close file
+G695D  CALL  G@G6976          set VDP reg 1
+       CALL  G@G6D0E          VDP setup for cartridge
+       CEQ   >0F,@>8322       is it error 23?
+       BR    G@G696F          no
+       CALL  G@G6A39          announce error
+       DATA  G6B7E            'program not found'
+       BR    G@G69B9
+ 
+G696F  CALL  G@G6A39          announce error
+       DATA  G6B14            'error code ..'
+       BR    G@G6020          back to MINI MEMORY program entry point
+*
+G6976  MOVE  >0001,G@G6982,#>01    set VDP register 1 to standard mode
+       CLOG  >08,@>8348       check flag
+       BR    G@G6D32          was called by error display routine: display error
+       RTN                    else return to caller
+G6982  BYTE  >E0
+*
+G6983  CALL  G@G6A2D          9: warning
+       DATA  G6B1F            control character removed
+       BR    G@G6955
+ 
+G698A  CALL  G@G6A39          8: error
+       DATA  G6AD7            memory full
+       BR    G@G6955
+ 
+G6991  CALL  G@G6A39          error
+       DATA  G6B7E            program not found
+       BR    G@G6074          back to main menu display
+ 
+G6998  CALL  G@G6A39          10: error
+       DATA  G6B39            illegal tag
+       BR    G@G6852          back to 'load and run'
+ 
+G699F  CALL  G@G6A39          11: error
+       DATA  G6B45            checksum error
+       BR    G@G6852          back to 'load and run'
+ 
+G69A6  CALL  G@G6A39          12: error
+       DATA  G6B54            duplicate definition
+       BR    G@G6852          back to 'load and run'
+ 
+G69AD  CALL  G@G6A39          13: error
+       DATA  G6B69            unresolved reference
+       BR    G@G6852          back to 'load and run'
+ 
+G69B4  CALL  G@G6A39          error
+       DATA  G6B06            name too long
+G69B9  DCZ   @>8350           name size = 0?
+       BS    G@G69C8          yes
+       ST    >20,V*>834E      no: erase it from display
+       MOVE  @>8350,V*>834E,V@>0001(@>4E)
+G69C8  CALL  G@G6AA0          erase line 22
+       BR    G@G68CC          back to 'run'
+*
+*----------------------------------------
+* I/O error
+*----------------------------------------
+G69CD  ST    V@>0001(@>1C),@>834E  get error code from PAB+1
+       AND   >E0,@>834E       keep only error bits
+       SRL   >05,@>834E       right-justify them
+       OR    >30,@>834E       make it a digit
+       AND   >1F,V@>0001(@>1C)     remove error bits from PAB+1
+       CEQ   >35,@>834E       is it 'past eof' error?
+       BR    G@G69E8          no
+       CALL  G@G69FC          yes: close all files
+G69E8  CALL  G@G6A39          display error
+       DATA  G6AE3            'I/O error code'
+G69ED  CALL  G@G69FC          close all files
+       CLOG  >20,@>8348       check flag
+       BR    G@G6074          back to main menu
+       CLOG  >01,@>8349
+       BR    G@G6852          back to 'load and run'
+       BR    G@G6020          back to MINI MEMORY program entry point
+*
+*----------------------------------------
+* Close all files
+*----------------------------------------
+G69FC  DST   >1000,@>831C     PAB pointer
+       CALL  G@G6A19          close file
+       DST   >1100,@>831C     ditto for all other PABs
+       CALL  G@G6A19
+       DST   >1200,@>831C
+       CALL  G@G6A19
+       DST   >1300,@>831C
+       CALL  G@G6A19
+       RTN
+*
+*----------------------------------------
+* Close 1 file
+*----------------------------------------
+G6A19  DST   @>831C,@>8356    PAB pointer
+       DADD  >0009,@>8356     name size ptr
+       ST    >01,V*>831C      set opcode as "close"
+       CALL  G@>0010          call DSR
+       BYTE  >08
+       CLR   V@>0009(@>1C)    disable PAB
+       RTN
+*
+*----------------------------------------
+* Display error message
+*----------------------------------------
+G6A2D  CALL  G@G6AA0          erase line 22
+       MOVE  >000B,G@G6ACC,V@>02A2        display  '* warning *'
+       BR    G@G6A43
+ 
+G6A39  CALL  G@G6AA0          erase line on screen
+       MOVE  >0009,G@G6AAC,V@>02A2        display '* error *'
+* EPEP FETC->FETCH G6A43  FETC  @>834A           fetch error message ptr
+G6A43  FETCH  @>834A           fetch error message ptr
+       FETCH  @>834B
+       CLR   @>834C
+       MOVE  >0001,G@>0000(@>4A),@>834D   get size
+       MOVE  @>834C,G@>0001(@>4A),V@>02C2        display message
+       DCEQ  G6AE3,@>834A     is it 'I/O error ..' ?
+       BR    G@G6A61          no
+       ST    @>834E,V@>02D2   yes: display error code
+G6A61  DCEQ  G6B14,@>834A     is it 'error code ..'
+       BR    G@G6A90          no
+ 
+       DSRL  >0004,@>8322     keep only first nibble
+       SRL   >04,@>8323       the second ended here: make it a byte
+       CH    >09,@>8322       first nibble greater than 9?
+       BR    G@G6A7B          no
+       CH    >0F,@>8322       is it higher than 15? (should not happen)
+       BS    G@G6A90          yes: display as such
+       ADD   >07,@>8322       adjust char to A-F range
+G6A7B  CH    >09,@>8323       second nibble greater than 9 ?
+       BR    G@G6A88          no
+       CH    >0F,@>8323       is it higher than 15?
+       BS    G@G6A90          display as such
+       ADD   >07,@>8323       adjust char to A-F range
+G6A88  DADD  >3030,@>8322     make each nibble a hex character
+       DST   @>8322,V@>02D0   display error code on screen
+ 
+G6A90  MOVE  >0017,G@G6AB5,V@>02E2        display 'press enter to continue'
+G6A97  SCAN
+       BR    G@G6A97          wait for a key to be pressed
+       CEQ   >0D,@>8375       is it <enter> ?
+       BR    G@G6A97          no: keep waiting
+       RTN                    yes: done
+*
+*----------------------------------------
+* Erase line 22  on screen
+*----------------------------------------
+G6AA0  ST    >20,V@>02A0
+       MOVE  >005F,V@>02A0,V@>02A1
+       RTN
+*
+*----------------------------------------
+* Error messages for cartridge use (no Basic bias)
+*----------------------------------------
+G6AAC  TEXT  '* ERROR *'
+G6AB5  TEXT  'PRESS ENTER TO CONTINUE'
+G6ACC  TEXT  '* WARNING *'
+G6AD7  STRI  'MEMORY FULL'
+G6AE3  STRI  'I/O ERROR CODE'
+G6AF2  STRI  'NO MEMORY EXPANSION'
+G6B06  STRI  'NAME TOO LONG'
+G6B14  STRI  'ERROR CODE'
+G6B1F  STRI  'CONTROL CHARACTER REMOVED'
+G6B39  STRI  'ILLEGAL TAG'
+G6B45  STRI  'CHECKSUM ERROR'
+G6B54  STRI  'DUPLICATE DEFINITION'
+G6B69  STRI  'UNRESOLVED REFERENCE'
+G6B7E  STRI  'PROGRAM NOT FOUND'
+*
+*----------------------------------------
+* Special character patterns
+*----------------------------------------
+G6B90  DATA  >3C42,>99A1,>A199,>423C    copyright symbol
+G6B98  DATA  >7070,>7070,>7070,>7070    vertical bar cursor
+G6BA0  DATA  >007E,>4242,>4242,>7E00    box cursor
+G6BA8  BYTE  >E0              VDP registers values: standard mode
+       BYTE  >00              screen image at >0000
+       BYTE  >0E              color table at >0380
+       BYTE  >01              char patterns at >0800
+       BYTE  >06              sprite attributes at >0300
+       BYTE  >00              sprite patterns at >0000
+       BYTE  >F5              text/screen colors: white / light blue
+*
+*----------------------------------------
+* Input a filename and prepare its PAB
+*----------------------------------------
+G6BAF  CALL  G@G6BDF                      erase data buffer
+       CALL  G@G6C0D                      clear 70 bytes in PAB
+       DST   @>831C,V@>0002(@>1C)         data buffer address
+       DADD  >0080,V@>0002(@>1C)          will be 128 bytes after PAB
+       ST    >00,V@>0008(@>1C)            no basic bias
+       DST   >5000,V@>0004(@>1C)          rec len = 80, char count = 0
+       CALL  G@G6C19                      input file name
+       DCZ   @>8350                       name length = 0 ?
+       BS    G@G6BDE                      yes: done
+G6BD2  MOVE  @>8350,V*>834E,V@>000A(@>1C)   copy filename to PAB+10
+       ST    @>8351,V@>0009(@>1C)         copy name size to PAB+9
+G6BDE  RTN
+*
+*----------------------------------------
+* Erase data buffer area
+*----------------------------------------
+G6BDF  DADD  >0080,@>831C     data buffer area ptr
+       ST    >20,V*>831C
+       MOVE  >004F,V*>831C,V@>0001(@>1C)  init data buffer as 80 spaces
+       DSUB  >0080,@>831C     restore PAB ptr
+       RTN
+*
+*----------------------------------------
+* Close a file
+*----------------------------------------
+G6BF4  ST    >01,V*>831C      opcode = close
+       DST   @>831C,@>8356    PAB ptr
+       DADD  >0009,@>8356     name length ptr
+       CALL  G@>0010          call DSR
+       BYTE  >08
+       BS    G@G69CD               error
+       CLOG  >E0,V@>0001(@>1C)     check error bits in PAB+1
+       BR    G@G69CD               some are set: error
+       RTN                         ok
+*
+*----------------------------------------
+* Clear 70 bytes in PAB
+*----------------------------------------
+G6C0D  CLR   V*>831C
+       MOVE  >0045,V*>831C,V@>0001(@>1C)
+       RTN
+*
+*----------------------------------------
+* Input a line onscreen. Find its start and size
+*----------------------------------------
+G6C19  CALL  G@G6C4C          input a line from the keyboard
+       DST   @>8324,@>8320    start-of-line ptr
+       ST    >3C,@>8300       max length (about 2 lines)
+       DCLR  @>8350
+G6C24  CEQ   >20,V*>8320      skip leading spaces
+       BR    G@G6C3A
+       DINC  @>8320           increment start ptr
+       DEC   @>8300           decrement size
+       BR    G@G6C24          try again
+ 
+       DST   @>8324,@>8320    line is empty
+       CLOG  >04,@>8348       is it ok?
+       BR    G@G6C4B          yes: return
+       BR    G@G6C19          no: stay in input mode
+ 
+G6C3A  DST   @>8320,@>834E    start of text
+G6C3D  CEQ   >20,V*>8320      find first trailing space
+       BS    G@G6C4B          found= end of line: return
+       DINC  @>8350           filename length
+       DINC  @>8320           check next char
+       DEC   @>8300           more on line?
+       BR    G@G6C3D          yes
+G6C4B  RTN
+*
+*----------------------------------------
+* Input characters from keyboard  echo them on screen
+* Active function keys: Back, Del, Ins, <-, ->, and <enter>
+*----------------------------------------
+G6C4C  ST    >1F,@>8318       cursor character
+       DST   @>8320,@>8324    start of line
+       DST   @>8320,@>8326    end of line
+G6C55  CLR   @>8379           reset VDP interrupts counter
+       EX    V*>8320,@>8318   put cursor/char on screen
+G6C5B  SCAN                   key pressed?
+       BS    G@G6C65          yes
+       CHE   >0F,@>8379       no: time to blink?
+       BR    G@G6C5B          not yet: keep scanning
+       BR    G@G6C55          swap cursor and char
+G6C65  CEQ   >1F,V*>8320      is cursor on screen?
+       BR    G@G6C6F          no
+       EX    V*>8320,@>8318   yes: replace original char
+G6C6F  DST   @>8320,@>8300    current char
+       DSUB  @>8324,@>8300    minus line start = line size
+ 
+       CHE   >20,@>8375       funtion key?
+       BR    G@G6C94          no
+       CLOG  >01,@>8348       yes: are we in insert mode?
+       BR    G@G6CE7          yes
+G6C7F  ST    @>8375,V*>8320   overwrite mode: echo char onscreen
+       DCH   @>8326,@>8320    did we pass end of line?
+       BR    G@G6C8B          no
+       DST   @>8320,@>8326    yes: then this will be the new eol
+G6C8B  CH    >3C,@>8301       did we reach maximum length?
+       BS    G@G6C55          yes: wait for key
+       DINC  @>8320           no: move cursor forward
+       BR    G@G6C55          wait for key
+ 
+G6C94  AND   >FE,@>8348       remove insert mode flag
+       CEQ   >0F,@>8375       is key Fctn-9 ?
+       BR    G@G6CA3          no
+       CLOG  >20,@>8348       <back>: who was the caller?
+       BR    G@G69ED          close files and return to 'load and run' or reinit
+       BR    G@G6074          to main menu display
+ 
+G6CA3  CEQ   >09,@>8375       was key Fctn-D ?
+       BS    G@G6C8B          yes
+       CEQ   >08,@>8375       was key Fctn-S ?
+       BR    G@G6CB5          no
+       CZ    @>8301           <- key: are we on first char?
+       BS    G@G6C55          yes: don't do anything
+       DDEC  @>8320           back one char
+       BR    G@G6C55          wait for another key
+ 
+G6CB5  CEQ   >0D,@>8375       was key <enter> ?
+       BS    G@G6D0D          yes
+       CEQ   >03,@>8375       was key Fctn-1 ?
+       BR    G@G6CDD          no
+       ST    >20,V*>8320      <del>: erase current char (in case line is empty)
+       DST   @>8326,@>8300    end of line
+       DSUB  @>8320,@>8300    number of chars past cursor position
+       CGT   >00,@>8301       is it 0 ?
+       BR    G@G6C55          yes: wait for next key
+       MOVE  @>8300,V@>0001(@>20),V*>8320        shift line 1 position to the left
+       ST    >20,V*>8326      erase last char
+       DDEC  @>8326           reduce line length
+       BR    G@G6C55          wait for next key
+ 
+G6CDD  CEQ   >04,@>8375       was key Fctn-2 ?
+       BR    G@G6D0B          no
+       OR    >01,@>8348       <insert>: set insert mode flag
+       BR    G@G6C55          wait for next key
+ 
+G6CE7  DST   @>8326,@>8300    insert mode
+       DSUB  @>8324,@>8300    calculate line length
+       CH    >3C,@>8301       did we reach maximum size?
+       BS    G@G6C55          yes: do not insert, wait for next key
+       DST   @>8326,@>8300    no: end of line ptr
+       DSUB  @>8320,@>8300    number of chars from cursor to end of line
+       DINC  @>8300           increment size
+       MOVE  @>8300,V*>8320,V@>03C0       save to buffer
+       MOVE  @>8300,V@>03C0,V@>0001(@>20)        write back, one position to the right
+       DINC  @>8326           increment line size
+       BR    G@G6C7F          echo character on screen, wait for next key
+ 
+G6D0B  BR    G@G6C55          ignore all other function keys: wait for next key
+ 
+G6D0D  RTN                    <enter> was pressed
+*
+*----------------------------------------
+* VDP setup for module
+*----------------------------------------
+G6D0E  ST    >D0,V@>0300      no sprites
+       ST    >F5,V@>0380      init color table as white on blue for all chars
+       MOVE  >001F,V@>0380,V@>0381
+       ALL   >20              erase screen
+       BACK  >F5              screen colors: white on light blue
+       RTN
+*
+*----------------------------------------
+* VDP setup for user's programs
+*----------------------------------------
+G6D22  ST    >13,V@>0380      init color table as black on green for all chars
+       MOVE  >001F,V@>0380,V@>0381
+       ALL   >20              erase screen
+       BACK  >F3              screen color: white on light green
+       RTN
+*
+*----------------------------------------
+* Process errors when called from Basic
+*----------------------------------------
+G6D32  DECT  @>8373           remove return point from sub-stack (direct return)
+       CHE   >0F,@>8322       error code higher than 15?
+       BS    G@G6D3C          yes
+       CALL  G@G6A19          no: close file
+G6D3C  CH    >25,@>8322       error code higher than 37?
+       BS    G@G6E09          yes: unknown error code
+       CHE   >08,@>8322       error code 1-7?
+       BR    G@G6E0E          yes: I/O error
+       SUB   >08,@>8322
+       CASE  @>8322           brach to appropriate call to the error routine
+       BR    G@G6D87
+       BR    G@G6DA5
+       BR    G@G6D8C
+       BR    G@G6D91
+       BR    G@G6D96
+       BR    G@G6D9B
+       BR    G@G6DA5
+       BR    G@G6DA0
+       BR    G@G6DA5
+       BR    G@G6DAA
+       BR    G@G6DAF
+       BR    G@G6DB4
+       BR    G@G6DB9
+       BR    G@G6DBE
+       BR    G@G6DC3
+       BR    G@G6DC8
+       BR    G@G6DCD
+       BR    G@G6DD2
+       BR    G@G6DD7
+       BR    G@G6DDC
+       BR    G@G6E15
+       BR    G@G6DE1
+       BR    G@G6DE6
+       BR    G@G6DEB
+       BR    G@G6DF0
+       BR    G@G6D87
+       BR    G@G6DF5
+       BR    G@G6DFA
+       BR    G@G6DFF
+       BR    G@G6E04
+*
+*----------------------------------------
+* Display error message in TI-Basic
+* Uses G@>001C which returns direclty to Basic
+*----------------------------------------
+G6D87  CALL  G@>001C
+       DATA  >2049            8 33: memory full
+G6D8C  CALL  G@>001C
+       DATA  G6E1A            10: illegal tag
+G6D91  CALL  G@>001C
+       DATA  G6E26            11: checksum error
+G6D96  CALL  G@>001C
+       DATA  G6E35            12: duplicate definition
+G6D9B  CALL  G@>001C
+       DATA  G6E4A            13: unresolved reference
+G6DA0  CALL  G@>001C
+       DATA  G6E5F            15: program not found
+G6DA5  CALL  G@>001C
+       DATA  >202C            9 14 16: incorrect statement
+G6DAA  CALL  G@>001C
+       DATA  >2040            17: bad name
+G6DAF  CALL  G@>001C
+       DATA  >2055            18: cannot continue
+G6DB4  CALL  G@>001C
+       DATA  >2064            19: bad value
+G6DB9  CALL  G@>001C
+       DATA  >206E            20: number too big
+G6DBE  CALL  G@>001C
+       DATA  >207D            21: string number mismatch
+G6DC3  CALL  G@>001C
+       DATA  >2094            22: bad argument
+G6DC8  CALL  G@>001C
+       DATA  >20A1            23: bad subscript
+G6DCD  CALL  G@>001C
+       DATA  >20AF            24: name conflict
+G6DD2  CALL  G@>001C
+       DATA  >20BD            25: cannot do that
+G6DD7  CALL  G@>001C
+       DATA  >20D9            26: bad line number
+G6DDC  CALL  G@>001C
+       DATA  >20F9            27: for-next error
+G6DE1  CALL  G@>001C
+       DATA  >211D            29: file error
+G6DE6  CALL  G@>001C
+       DATA  >2128            30: input error
+G6DEB  CALL  G@>001C
+       DATA  >2134            31: data error
+G6DF0  CALL  G@>001C
+       DATA  >213F            32: line too long
+G6DF5  CALL  G@>001C
+       DATA  G6E84            34: syntax error
+G6DFA  CALL  G@>001C
+       DATA  G6E91            35: numeric overflow
+G6DFF  CALL  G@>001C
+       DATA  G6EA2            36: unrecognized character
+G6E04  CALL  G@>001C
+       DATA  G6EB9            37: string truncated
+G6E09  CALL  G@>001C
+       DATA  G6E71            38+ : unknown error code
+G6E0E  DST   @>831C,@>8304    1-7: i/o errors
+       DSUB  >0004,@>8304     PAB ptr needed for G@>001C to display opcode
+G6E15  CALL  G@>001C
+       DATA  >2113            28: i/o error
+*
+*----------------------------------------
+* Error messages not provided by TI-Basic
+* The Basic bias of >60 is added to each char
+*----------------------------------------
+*EPEP Modified xga99.py to support adding the >60 to each 
+*      character with the STRI60 directive.
+*      Thus each STRI below changed to STRI60
+*EPEP       BIAS  >60
+
+G6E1A  STRI60  "ILLEGAL TAG"
+G6E26  STRI60  "CHECKSUM ERROR"
+G6E35  STRI60  "DUPLICATE DEFINITION"
+G6E4A  STRI60  "UNRESOLVED REFERENCE"
+G6E5F  STRI60  "PROGRAM NOT FOUND"
+G6E71  STRI60  "UNKNOWN ERROR CODE"
+G6E84  STRI60  "SYNTAX ERROR"
+G6E91  STRI60  "NUMERIC OVERFLOW"
+G6EA2  STRI60  "UNRECOGNIZED CHARACTER"
+G6EB9  BYTE  >16                      bug: should be >10 (i.e. 16 decimal!)
+       TEXT60  "STRING TRUNCATED"
+       BYTE  >00,>00,>00,>00,>00,>00
+*
+* Bytes >6ECA to >70AC contain >00
+*

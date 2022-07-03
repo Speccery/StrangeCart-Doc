@@ -1,0 +1,458 @@
+*======================================
+* EASYBUG Fairly primitive debugger
+*         Mainly, memory editor with loading and saving capabilities.
+*         Can also perform CRU operations and execute assembly programs
+*         (but not step in them, not set breakpoints).
+*======================================
+** EPEP       AORG  >70AC
+** In xga99 the range of AORG parameter is 0 <= x < 0x2000
+**       AORG >10AC
+
+** EPEP Huge kludge, fill the memory range up to 70AC with 0000 manually.
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0   ; 32 bytes
+       DATA 0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0       ; 28 bytes
+ 
+G70AC  DATA  GSCDIAG_E,G70B9    EP added GSCDIAG here
+       STRI  'EASY BUG'
+*
+G70B9  DST   >0900,@>834A     program entry point
+       CALL  G@>0018          load upper case chars
+       CLR   @>8374           keyboard type = default
+G70C2  ALL   >20              clear screen
+       MOVE  >00E0,G@G74FD,V@>0000  display help screen (why 4 instructions?)
+       MOVE  >00E0,G@G75DD,V@>00E0  -------------------
+       MOVE  >00E0,G@G76BD,V@>01C0
+       MOVE  >0060,G@G779D,V@>02A0
+G70E0  SCAN
+       BR    G@G70E0          wait for a key
+ 
+       ALL   >20              clear screen
+G70E5  DST   >02E2,@>8396     input line ptr
+       ST    >3F,V*>8396      display cursor
+G70EE  SCAN
+       BR    G@G70EE          wait for a key
+       CEQ   >01,@>8375       <aid>
+       BS    G@G70C2          display help screen again
+       CEQ   >4D,@>8375       <M>
+       BS    G@G711B          input a #
+       CEQ   >47,@>8375       <G>
+       BS    G@G711B          input a #
+       CEQ   >56,@>8375       <V>
+       BS    G@G711B          input a #
+       CEQ   >45,@>8375       <E>
+       BS    G@G711B          input a #
+       CEQ   >53,@>8375       <S>
+       BS    G@G711B          input a #
+       CEQ   >4C,@>8375       <L>
+       BS    G@G7274
+       CEQ   >43,@>8375       <C>
+       BS    G@G711B          input a #
+       BR    G@G70EE          neither of these: keep waiting
+ 
+G711B  DINC  @>8396           input a number
+       ST    @>8375,V*>8396   -------------- echo previous char on screen
+G7122  DCLR  @>839A           number buffer
+G7125  SCAN                   wait for a key
+       BR    G@G7125
+       CEQ   >0D,@>8375       <enter>
+       BS    G@G718E
+       CEQ   >2E,@>8375       .
+       BS    G@G7188
+       ST    @>8375,@>838E    save key code
+** EPEP       CGTE  >30,@>8375       check range
+       CGE  >30,@>8375       check range
+       BR    G@G7125          below '0': ignore
+       CGT   >39,@>8375
+       BS    G@G7178          above '9'
+       SUB   >30,@>838E       '0'-'9': make it a nibble
+G7144  DSLL  >0004,@>839A     next nibble
+       ADD   @>838E,@>839B    add it
+       DINC  @>8396           increment screen pointer
+       DCEQ  >02FE,@>8396     last position?
+       BR    G@G7172          no
+G7158  CALL  G@G72CF          yes: scroll
+G715B  DST   G7167,@>838E     sound list ptr
+       I/O   >00,@>838E       issue sound from grom
+       B     G@G70E5          wait for new command
+G7167  BYTE  >06              sound list for error tone
+       BYTE  >BF,>DF,>FF      generators #2  #3 and noise: off
+       BYTE  >80,>05          4th F on generator #1
+       BYTE  >92              volume: -4 dB
+       BYTE  >0A              duration: 1/6 sec
+       BYTE  >01              next sound
+       BYTE  >9F              generator #1: off
+       BYTE  >00              end of list
+ 
+G7172  ST    @>8375,V*>8396   echo char on screen
+       BR    G@G7125          next char
+G7178  CGT   >46,@>8375       check hex range
+       BS    G@G7125          greater than 'F': ignore
+** EPEP       CGTE  >41,@>8375
+       CGE   >41,@>8375
+       BR    G@G7125          lower than 'A': ignore
+       SUB   >37,@>838E       make it a nibble
+       BR    G@G7144          add it to number
+ 
+G7188  CALL  G@G72CF          <.>:  scroll up
+       B     G@G70E5          wait for new command
+ 
+G718E  CALL  G@G72CF          <enter>: scroll up
+ 
+*                             execute assembly
+       CEQ   >45,V@>02C3      ---------------- was command <E> ?
+       BR    G@G71B0          no
+       DST   @>8300,@>838E    save >8300
+       DST   >83B0,@>8300     place vector in >8300
+       MOVE  >000A,G@G74C1,@>83B0  place assembly routine in PAD
+       DST   >0451,@>83BA     truncatt it with B *R1
+       XML   >F0              execute it
+       B     G@G70E5          wait for another command
+ 
+G71B0  CEQ   >4D,V@>02C3      was key <M> ?
+       BS    G@G72E3
+       CEQ   >47,V@>02C3      was key <D> ?
+       BS    G@G72E3
+       CEQ   >56,V@>02C3      was key <V> ?
+       BS    G@G72E3
+       CEQ   >43,V@>02C3      was key <C> ?
+       BS    G@G72E3
+       DCEQ  >544F,V@>02C3    was it "TO"
+       BS    G@G71E9
+       CEQ   >53,V@>02C3      was it <S>
+       BR    G@G70E5          no: ignore and wait for another key
+       MOVE  >0004,G@G74BD,V*>8396  display "...."
+       DADD  >0004,@>8396     update ptr
+       DST   @>839A,@>839C    save this number
+       B     G@G7122          and input another
+*
+*--------------------------------------
+* S: save program to CS1
+*--------------------------------------
+G71E9  DCH   @>839A,@>839C                compare end with start
+       BS    G@G715B                      end < start: error
+       DCH   >83FF,@>839C                 are we in Easybug reserved memory (>8370-83FF)
+       BS    G@G7205                      no
+       DCHE  >8370,@>839C          
+       BS    G@G715B                      yes: error
+       DCHE  >8370,@>839A          
+       BS    G@G715B                      yes: error
+G7205  DSUB  @>839C,@>839A         
+       DINC  @>839A         
+       DCH   >2000,@>839A                 are we in ROM?
+       BS    G@G715B                      yes: error
+       DST   @>839A,@>8390                save end address
+       ST    >00,V@>1103                  trick: set VDP to write at >1104
+       DST   @>8300,@>838E                save >8300
+       DST   >83AA,@>8300                 load vector
+       MOVE  >0016,G@G74D5,@>83AA         load assembly routine: copy CPU mem to VDP
+       XML   >F0                          execute it
+       DST   @>839A,V@>1102               address
+       DST   @>839C,V@>1100               byte count
+       DADD  >0004,@>839A
+       MOVE  >000D,G@G7267,V@>1000        load PAB
+       DST   @>839A,V@>1006
+       MOVE  >0030,@>8340,V@>100D         save >8340-8370
+       DST   >1009,@>8356                 DSR name ptr in PAB
+       CALL  G@>0010                      call DSR
+       BYTE  >08
+       MOVE  >0030,V@>100D,@>8340         restore >8340-8370
+       B     G@G70E5
+*
+*--------------------------------------
+* PAB for CS1
+*--------------------------------------
+G7267  DATA  >0602            opcode = save  type = Dis/Fix  mode = output
+       DATA  >1100            buffer area = >1100
+       DATA  >4000            rec len = 64  chars = 0
+       DATA  >2000            max size = >2000 bytes
+       BYTE  >00              screen offset = >00
+       STRI  'CS1'
+*
+*--------------------------------------
+* L: load program from CS1
+*--------------------------------------
+G7274  DINC  @>8396          increment screen ptr
+       ST    @>8375,V*>8396  echo key onscreen
+       MOVE  >000D,G@G7267,V@>1000  place CS1 PAB in VDP mem
+       DST   >0504,V@>1000          opcode = load, type = Dis/Fix, input
+       MOVE  >0030,@>8340,V@>100D   save >8340-836F
+       DST   >1009,@>8356     DSR name ptr in PAB
+       CALL  G@>0010          call DSR
+       BYTE  >08
+       MOVE  >0030,V@>100D,@>8340   restore >8340-836F
+       DST   V@>1100,@>839C   pass address to assembly routine
+       DST   V@>1102,@>8390   pass byte count
+       ST    V@>1103,@>838E   trick: set VDP to read from >1104
+       DST   @>8300,@>838E    save >8300
+       DST   >83AA,@>8300     load vector for XML >F0
+       MOVE  >0016,G@G74D5,@>83AA  load assembly routine: write CPU mem to VDP
+       DST   >DCAF,@>83B4     patch it: MOVB @>FBFE(15),*R2+
+       DST   >FBFE,@>83B6     now it will read from VDP
+       XML   >F0              execute it
+       B     G@G70E5          wait for next command
+*
+*--------------------------------------
+* Scroll up
+*--------------------------------------
+G72CF  MOVE  >02E0,V@>0020,V@>0000  scroll up lines 0-22
+       MOVE  >001F,V@>02E0,V@>02E1  erase last line
+       DST   >02E3,@>8396           reset cursor ptr
+       RTN
+*
+*--------------------------------------
+* M,V,G,C: display a byte from memory/CRU, input new value
+*--------------------------------------
+G72E3  ST    V@>02C3,V*>8396       echo key on screen
+       DINC  @>8396                increment cursor ptr
+       DST   @>839A,@>8390
+       CALL  G@G7456               convert number to string
+       MOVE  >0004,@>8392,V*>8396  display it on screen
+       DADD  >0005,@>8396          update ptr
+       ST    >3D,V*>8396           display =
+       DINC  @>8396                increment ptr
+ 
+*                                  CPU memory input
+       CEQ   >4D,V@>02C3           ---------------- was command <M>?
+       BR    G@G7320               no
+       MOVE  >0010,G@G74C1,@>83B0  load assembly routine: read 1 byte
+       DST   @>8300,@>838E         save >8300
+       DST   >83B0,@>8300          load vector
+       XML   >F0                   execute assembly routine
+       B     G@G735D 
+       
+*                                  GROM input
+G7320  CEQ   >47,V@>02C3           ---------- was command <G>?
+       BR    G@G7331               no
+       MOVE  >0001,G@>0000(@>9A),@>8391   get 1 byte from GROM at address >839A
+       B     G@G735D               display it
+ 
+*                                  CRU input
+G7331  CEQ   >43,V@>02C3           --------- was command <C>?
+       BR    G@G734E               no
+       CLR   @>8391                clear buffer
+       MOVE  >0012,G@G74EB,@>83B0  load assembly routine to read 1 bit from CRU
+       DST   @>8300,@>838E         save >8300
+       DST   >83B0,@>8300          load vector
+       XML   >F0                   execute routine: get 1 bit into >8391
+       B     G@G735D               display bit
+ 
+*                             VDP input
+G734E  DST   @>839A,@>839C    --------- save address
+       DAND  >FFFF,@>839C     bug: should be >3FFF
+       ST    V*>839C,@>8391   get byte from VDP memory
+ 
+*                             display byte
+G735D  CALL  G@G7488          ------------ convert byte to string
+       DST   @>8394,V*>8396   display it on screen
+       DADD  >0003,@>8396     update ptr
+       DST   >2D3E,V*>8396    display ->
+       DADD  >0002,@>8396     update ptr
+ 
+*                             user input
+       CLR   @>8399           ---------- init number buffer
+G7377  SCAN
+       BR    G@G7377          wait for a key
+       CEQ   >3C,@>8375       <
+       BS    G@G70C2          back to help screen
+       CEQ   >2E,@>8375       .
+       BS    G@G7188          scroll up, wait for new command
+       CEQ   >0D,@>8375       <enter>
+       BS    G@G73E9          write value
+       CEQ   >2D,@>8375       -
+       BS    G@G73DA          previous address
+       CEQ   >20,@>8375       <space>
+       BS    G@G73E0          next address
+ 
+*                             input a hex number
+       ST    @>8375,@>838E    ------------------ save key
+** EPEP       CGTE  >30,@>8375       less than 0?
+       CGE  >30,@>8375       less than 0?
+       BR    G@G7377          yes: ignore it
+       CGT   >39,@>8375       greater than 9?
+       BS    G@G73CA          yes
+       SUB   >30,@>838E       inrange 0-9: make it a nibble
+G73A5  SLL   >04,@>8399       shift # in buffer
+       ADD   @>838E,@>8399    add new nibble
+       DINC  @>8396           increment screen ptr
+       DCEQ  >02FE,@>8396     did we reach the end of line?
+       BS    G@G73BE          yes
+       ST    @>8375,V*>8396   no: then display the key
+       BR    G@G7377          and wait for the next one
+G73BE  DST   G7167,@>838E     sound list for error tone
+       I/O   >00,@>838E       play it
+       B     G@G718E          scroll up and wait for another command
+G73CA  CGT   >46,@>8375       is key greater than F?
+       BS    G@G7377          yes: ignore it
+** EPEP       CGTE  >41,@>8375       is key smaller than A?
+       CGE   >41,@>8375       is key smaller than A?
+       BR    G@G7377          yes: ignore it
+       SUB   >37,@>838E       in range A-F: make it a nibble
+       BR    G@G73A5
+ 
+G73DA  DDEC  @>839A           <-> decrement address
+       B     G@G73E3
+ 
+G73E0  DINC  @>839A           <space> increment address
+G73E3  CALL  G@G72CF          scroll up
+       B     G@G72E3          and start again
+ 
+G73E9  DCEQ  >02EF,@>8396     <enter>
+       BS    G@G73E0          end of line reached: next address
+ 
+*                             write to CPU memory
+       CEQ   >4D,V@>02C3      ------------------- was command <M>?
+       BR    G@G741F          no
+       DCHE  >8370,@>839A     check if address is reserved for Easybug
+       BR    G@G7404          no
+       DCH   >83FF,@>839A
+       BR    G@G7158          yes: scroll, error tone, wait for command
+G7404  MOVE  >0010,G@G74C1,@>83B0  load assembly routine: read from CPU mem
+       MOVE  >0004,G@G74D1,@>83BA  patch it to write to CPU mem
+       DST   @>8300,@>838E    save >8300
+       DST   >83B0,@>8300     load vector
+       XML   >F0              execute assembly routine
+       B     G@G73E0          next address
+ 
+*                             write to VDP memory
+G741F  CEQ   >56,V@>02C3      ------------------- was command <V>?
+       BR    G@G7437          no
+       DST   @>839A,@>839C    get address
+       DAND  >3FFF,@>839C     adjust to VDP range
+       ST    @>8399,V*>839C   write byte to VDP memory
+       B     G@G73E0          next address
+ 
+*                             write to CRU
+G7437  CEQ   >43,V@>02C3      ------------ was command <C>?
+       BR    G@G73E0          no: next address (can't write to GRAM)
+       DST   @>839A,@>83B0    address will be CRU address
+       ST    >01,@>83B2       1 bit operation
+       ST    >99,@>83B3       value is in >8399
+       DSRL  >0001,@>83B0     divide CRU by 2 (GPL multiplies it again)
+       I/O   >03,@>83B0       CRU output
+       B     G@G73E0          next address
+*
+*--------------------------------------
+* Convert integer to a 4-digits headecimal string
+* Integer in >8390-91, string in >8392-95
+*--------------------------------------
+G7456  ST    @>8390,@>8392    copy number
+       SRL   >04,@>8392       isolate first nibble
+       CGT   >09,@>8392       greater than 9?
+       BS    G@G746B          yes
+       ADD   >30,@>8392       no: make it char 0-9
+       BR    G@G746F
+G746B  ADD   >37,@>8392       yes: make it char A-F
+G746F  ST    @>8390,@>8393    copy number
+       AND   >0F,@>8393       isolate second nibble
+       CGT   >09,@>8393       greater than 9?
+       BS    G@G7484          yes
+       ADD   >30,@>8393       no: make it char 0-9
+       BR    G@G7488
+G7484  ADD   >37,@>8393       yes: make it char A-F
+ 
+G7488  ST    @>8391,@>8394    copy second byte of number
+       SRL   >04,@>8394       keep only first nibble
+       CGT   >09,@>8394       greater than 9?
+       BS    G@G749D          yes
+       ADD   >30,@>8394       no: make it char 0-9
+       BR    G@G74A1
+G749D  ADD   >37,@>8394       make it char A-F
+G74A1  ST    @>8391,@>8395    copy same byte again
+       AND   >0F,@>8395       keep only 2nd nibble
+       CGT   >09,@>8395       greater that 9?
+       BS    G@G74B5          yes
+       ADD   >30,@>8395       no: make it char 0-9
+       RTN
+G74B5  ADD   >37,@>8395       yes: make it char A-F
+       RTN
+*
+G74BA  TEXT  ' ->'
+G74BD  TEXT  'TO? '
+*
+*--------------------------------------
+* Assembly language routines
+* Loaded and executed in scratch-pad
+*--------------------------------------
+* Assembly routine for Execute, and cpu Memory input
+*
+G74C1  DATA  >C820,>838E,>8300,>C060,>839A,>D811,>8391,>045B
+*
+*      MOV  @>838E,@>8300     restore vector location
+*      MOV  @>839A,R1         get address
+*      MOVB *R1,@>8391        read a byte. Modified into B *R1 by Execute
+*      B    *R11              return to GPL
+*
+* Modification  for cpu Memory output
+G74D1  DATA  >D460,>8399
+*
+*74D1  MOVB @>8399,*R1        write byte to address
+*
+*--------------------------------------
+* Assembly routine for Save and Load
+* Copy CPU memory to/from VDP buffer
+* CPU address in >839C, byte count in >8390
+*
+G74D5  DATA >C820,>838E,>8300,>C0A0,>839C,>DBF2,>FFFE,>0620,>8390,>16FB,>045B
+*74D5  MOV  @>838E,@>8300     restore vector location
+*      MOV  @>839C,R2         get byte pointer
+*LP1   MOVB *R2+,@>FFFE(R15)  write byte to VDP
+*      DEC  @>8390            decrement counter
+*      JNE  LP1               more to do
+*      B    *R11              return to GPL
+*
+*--------------------------------------
+* Assembly routine for CRU input
+* Read 1 CRU bit into >8391, CRU address in >839A
+* ------------------------------
+G74EB  DATA  >C820,>838E,>8300,>C820,>839A,>83F8,>3460,>8391,>045B
+*
+*      MOV  @>838E,@>8300     restore vector location
+*      MOV  @>839A,@>83F8     load address in R12
+*      STCR @>8391,1          set 1 CRU bit
+*      B    *R11              return to GPL
+*--------------------------------------
+* Help screen
+*--------------------------------------
+** EPEP Not needed       BIAS  0
+G74FD  TEXT  '    ===COMMAND TYPES ARE===     '
+       TEXT  '                                '
+       TEXT  ' MXXXX  MODIFY  CPU  MEMORY     '
+       TEXT  ' GXXXX  DISPLAY GROM MEMORY     '
+       TEXT  ' VXXXX  MODIFY  VDP  MEMORY     '
+       TEXT  ' EXXXX  EXEC ASSEMBLY PROGRAM   '
+       TEXT  ' CXXXX  CRU SINGLE BIT I/O      '
+G75DD  TEXT  ' SXXXX  SAVE CPU MEMORY TO CS1  '
+       TEXT  '        (STARTING AT XXXX)      '
+       TEXT  ' L      LOAD STORAGE FROM CS1   '
+       TEXT  '                                '
+       TEXT  '                                '
+       TEXT  ' ==SPECIAL FUNCTION KEYS ARE==  '
+       TEXT  '                                '
+G76BD  TEXT  " 'AID'    DISPLAY THIS SCREEN   "
+       TEXT  ' PERIOD   ABORT A COMMAND       '
+       TEXT  ' ENTER    ENTER COMMAND/DATA    '
+       TEXT  ' MINUS    DISPLAY LAST MEMORY   '
+       TEXT  '          (CURRENT UNCHANGED)   '
+       TEXT  ' SPACE    DISPLAY NEXT MEMORY   '
+       TEXT  '          (CURRENT UNCHANGED)   '
+G779D  TEXT  '                                '
+       TEXT  ' *NOTE* CPU RAM 8370-83FF IS    '
+       TEXT  '        RESERVED FOR EASYBUG    '
+*
+G77FD  BYTE  >00
+G77FE  DATA  >A919
+ 
+** EPEP       END

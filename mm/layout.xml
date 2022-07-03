@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<romset>
+   <resources>
+      <rom id="gromimage" file="mmg.gbc"/>
+      <rom id="romimage" file="mmr.bin"/>
+      <ram id="bufferedRam" type="persistent" file="minimem.nv" length="4096" />
+   </resources>
+   <configuration>
+      <pcb type="minimem">
+          <socket id="rom_socket" uses="romimage"/>
+          <socket id="grom_socket" uses="gromimage"/>
+          <socket id="ram_socket" uses="bufferedRam"/>
+      </pcb>
+   </configuration>
+</romset>

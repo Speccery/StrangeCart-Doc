@@ -1,0 +1,751 @@
+********************************************
+* MINI-MEMORY MODULE   GROM DISASSEMBLY
+* ------------------   Th. Nouspikel 1999
+********************************************
+*
+* EP 2020-12-13 porting the source code over to xga99
+* Changes tagged with EPEP
+*
+* EPEP range in xga99 is 0 <= x < 0x2000        AORG >6000
+*       AORG >0
+ 
+G6000  DATA >AA01             standard header  version 1
+       DATA >0000             # of programs 0
+       DATA >0000             no power up
+       DATA G6010             program
+       DATA G6149             DSRs
+       DATA G6105             subprograms
+       DATA >0000
+       DATA >0000
+*==================================
+* Programs: MINI MEMORY and EASY BUG
+* --------
+*==================================
+G6010  DATA G70AC             next program
+       DATA G6020             address of this one
+       STRI 'STRANGE MEM'
+*
+G6020  CALL G@G6D0E           entry point for MINI MEMORY
+       ST    >05,@>8374
+       SCAN
+       CZ    @>8374           detect console type
+       BR    G@G6034
+       DST   >0B00,@>834A     standard
+       CALL  G@>004A          load lower case chars 96->
+       BR    G@G604D
+ 
+G6034  DST   >0A00,@>834A     load upper case chars 64->
+       CALL  G@>0018
+       DST   >0B00,@>834A     point at char 96
+G603F  ST    >C0,V*>834A      mark upper left corner
+       DADD  >0008,@>834A     next char
+       DCHE  >0C00,@>834A
+       BR    G@G603F          upto char 127
+ 
+G604D  CLR   @>8374
+       DST   >0900,@>834A     load upper case chars 32->
+       CALL  G@>0018
+ 
+       CLR   V@>0800          clear charpats 0-31
+       MOVE  >00FF,V@>0800,V@>0801
+       MOVE  >0008,G@G6B90,V@>0850        load charpat 10 (copyright sign)
+       MOVE  >0007,G@G6BA8,#>01           set VDP registers
+       MOVE  >0010,G@G6B98,V@>08F0        load charpat 30+31 (cursors)
+G6074  ST    >7E,@>8373       init subroutine stack
+G6077  DCLR  @>8322           clear error code
+G6079  DCLR  @>8348           clear flags
+G607B  ALL   >20              clear screen
+       FMT                    display main menu
+       COL   >00
+       ROW   >01
+       HTEX  '* MINI MEMORY FOR STRANGECART *'
+       ROW+  >02
+       COL   >02
+       HTEX  'PRESS:'
+       ROW+  >01
+       COL+  >1B
+       HTEX  '1 TO LOAD AND RUN'
+       ROW+  >01
+       COL+  >0F
+       HTEX  '2    RUN'
+       COL+  >18
+       ROW+  >01
+       HTEX  '3    RE-INITIALIZE'
+       ROW+  >09
+       COL+  >0D
+** EPEP       HTEX  '[>0A]'
+       HTEX  >0A
+       HTEX  '1981  TEXAS INSTRUMENTS'
+       FEND
+G60EC  SCAN
+       BR    G@G60EC          wait for the user to press a key
+       CEQ   >0F,@>8375       is it Fctn-9?
+       BR    G@G60F5          no
+       EXIT                   yes: reset the TI-99/4A
+ 
+G60F5  SUB   >31,@>8375       valid inputs are "1" to "3"
+       CHE   >03,@>8375
+       BS    G@G60EC          invalid: try again
+       CASE  @>8375
+       BR    G@G6852          "1"
+       BR    G@G68BC          "2"
+       BR    G@G67E9          "3"
+*
+*------------------------------------
+G6105  DATA  G610E,G64C2      linked list of subprograms
+       STRI  'INIT'
+G610E  DATA  G6117,G654A
+       STRI  'LOAD'
+G6117  DATA  G6120,G6655
+       STRI  'LINK'
+G6120  DATA  G6129,G65D7
+       STRI  'PEEK'
+G6129  DATA  G6133,G65D2
+       STRI  'PEEKV'
+G6133  DATA  G613D,G6545
+       STRI  'POKEV'
+G613D  DATA  GLST00,G675F
+       STRI  'CHARPAT'
+GLST00 DATA  GRUN00,GLIST
+       STRI  'LIST'
+GRUN00 DATA  GCART0,GRUN
+       STRI  'RUN'
+GCART0 DATA  GVSYNC0,GCARTS
+       STRI  'CARTS'
+GVSYNC0 DATA GDIR00,GVSYNC
+       STRI  'VSYNC'
+GDIR00 DATA  GGRAM0,GDIR
+       STRI  'DIR'
+GGRAM0 DATA   >0000,GRAM
+       STRI  'GRAM'
+*
+G6149  DATA  G6155,G616D      linked list of DSRs
+       STRI  'MINIMEM'
+G6155  DATA  G6161,G6177
+       STRI  'EXPMEM1'
+G6161  DATA  GEPSCMEM,G6181
+       STRI  'EXPMEM2'
+** EPEP my own stuff
+GEPSCMEM DATA GEPSCD1,GSCMEM
+       STRI  'STRANGE'
+GEPSCD1 DATA 0000,GSCMEM
+       STRI  'SCD1'
+*
+*==================================
+* DSRs: MINIMEM, EXPMEM1, EXPMEM2
+* ----
+* These three DSRs allow the user to store a file into the  mini-memory,
+* the low-memory expansion, and the high memory expansion respectively.
+*
+* Each memory starts with a 8-byte header containing file info:
+* 0000: >5A5A flag
+* 0002: >ffrr file type | record length
+* 0004: >0000 write pointer (var: mem offset / fix: rec #)
+* 0006: >0000 read pointer
+*==================================
+G616D  DST   >7000,@>835A     MINIMEM entry point
+       DST   >0FF8,@>835C
+       BR    G@G6189
+ 
+G6177  DST   >2000,@>835A     EXPMEM1 entry point
+       DST   >1FF7,@>835C
+       BR    G@G6189
+ 
+G6181  DST   >A000,@>835A     EXPMEM2 entry point
+       DST   >5FD8,@>835C
+ 
+G6189  DST   @>8356,@>8358    points at end of DSR name
+       DSUB  @>8354,@>8358    now point at beginning of name
+       MOVE  >000A,V@>FFF6(@>58),@>834A  copy PAB into scratch-pad memory
+       AND   >1F,V@>FFF7(@>58)   clear error flags
+       CH    >09,@>834A       opcode
+       BS    G@G61D8          illegal if >9
+       CASE  @>834A
+       BR    G@G61E1          0: open
+       BR    G@G6251          1: close
+       BR    G@G6253          2: read
+       BR    G@G62C2          3: write
+       BR    G@G634E          4: rewind
+       BR    G@G6365          5: old
+       BR    G@G6395          6: save
+       BR    G@G6433          7: delete
+       BR    G@G61D8          8: scratch record -> illegal opcode
+       BR    G@G63C3          9: status
+*
+** EPEP in the following the comments break xga99.py
+** EPEP G61B8  OR    >40,V@>FFF7(@>58) I/O error 2 "bad attribute"
+G61B8  OR    >40,V@>FFF7(@>58) 
+       BR    G@G61DE
+** EPEP G61C0  OR    >80,V@>FFF7(@>58) I/O error 4 "memory full"
+G61C0  OR    >80,V@>FFF7(@>58) 
+       BR    G@G61DE
+** EPEP G61C8  OR    >A0,V@>FFF7(@>58) I/O error 4 "past eof"
+G61C8  OR    >A0,V@>FFF7(@>58) 
+       BR    G@G61DE
+** EPEP G61D0  OR    >E0,V@>FFF7(@>58) I/O error 7 "file error"
+G61D0  OR    >E0,V@>FFF7(@>58)
+       BR    G@G61DE
+** EPEP G61D8  OR    >60,V@>FFF7(@>58) I/O error 3 "illegal opcode"
+G61D8  OR    >60,V@>FFF7(@>58) 
+G61DE  CALL  G@>0012           return to caller
+*
+*------------------------------------
+* Opcode 0: Open
+*------------------------------------
+G61E1  ST    @>834B,@>834A
+       AND   >06,@>834A       keep only access mode
+       DCEQ  >5AA5,@>0000(@>5A)    is there a file in memory?
+       BS    G@G61FA          yes
+       CEQ   >04,@>834A       no: input?
+       BS    G@G61D0          yes: file error
+       CALL  G@G646B          init memory if needed
+       BR    G@G6229
+ 
+G61FA  CEQ   >02,@>834A       output?
+       BR    G@G6204          no
+       CALL  G@G646B          init memory if needed
+       BR    G@G6229
+ 
+G6204  ST    @>834B,@>834A
+       AND   >18,@>834A       keep only file type
+       CEQ   @>0002(@>5A),@>834A
+       BR    G@G61B8          mismatch: "bad attributes" error
+       CZ    @>834E           rec len = 0?
+       BR    G@G6221          no
+       ST    @>0003(@>5A),V@>FFFA(@>58)   set default rec length
+       BR    G@G6229
+G6221  CEQ   @>0003(@>5A),@>834E          check if rec length matches
+       BR    G@G61B8          no: "bad attributes" error
+ 
+G6229  ST    @>834B,@>834A
+       AND   >06,@>834A       keep only opening mode
+       CEQ   >06,@>834A       append?
+       BR    G@G6244          no
+       CLOG  >10,@>834B       var/fix?
+       BS    G@G61B8          fix: "bad attributes" error
+       DST   @>0004(@>5A),@>0006(@>5A)           point to eof
+       BR    G@G6249
+G6244  DCLR  @>0006(@>5A)     point to top of file
+G6249  DCLR  V@>FFFC(@>58)    clear rec # in PAB
+G624E  CALL  G@>0012          return to caller
+*
+*------------------------------------
+* Opcode 1: Close
+*------------------------------------
+G6251  BR    G@G61DE          return to caller
+*
+*------------------------------------
+* Opcode 2: Read
+*------------------------------------
+G6253  CLOG  >02,@>834B       check access mode
+       BR    G@G61D8          error if output or append
+       CLOG  >10,@>834B       fix/var?
+       BS    G@G6287          fix
+       DCHE  @>0004(@>5A),@>0006(@>5A)
+       BS    G@G61C8          "past eof" error
+       DST   @>0006(@>5A),@>834A  current offset
+       DADD  @>835A,@>834A    make it an address
+       DADD  >0008,@>834A     skip header
+       ST    @>0000(@>4A),@>834F
+       CLR   @>834E           keep only char count
+       DINC  @>834A
+       DADD  @>834E,@>0006(@>5A)   add it to ptr
+       BR    G@G62A9
+ 
+G6287  DCGT  @>8350,@>0004(@>5A)   check record number
+       BR    G@G61C8          "past eof" error
+       ST    @>0003(@>5A),@>834F
+       CLR   @>834E           keep only char count
+** EPEP MPY->MUL      DMPY  @>834E,@>8350    times record number
+       DMUL  @>834E,@>8350    
+       DST   @>8352,@>834A    resulting offset
+       DADD  @>835A,@>834A    make it an address
+       DADD  >0008,@>834A     skip header
+       DINC  V@>FFFC(@>58)    increment rec # in PAB
+ 
+G62A9  DINC  @>0006(@>5A)     increment rec # in header
+       CZ    @>834F           any char to read?
+       BS    G@G62BA          no
+       MOVE  @>834E,@>0000(@>4A),V*>834C  transfer them to data buffer
+G62BA  ST    @>834F,V@>FFFB(@>58)  update # of char read in PAB
+       BR    G@G61DE          return to caller
+*
+*------------------------------------
+* Opcode 3: Write
+*------------------------------------
+G62C2  ST    @>834B,@>834A
+       AND   >06,@>834A       keep only access mode
+       CEQ   >04,@>834A       input?
+       BS    G@G61D8          yes: error
+       CLOG  >10,@>834B       var/fix?
+       BS    G@G6304          fix
+       DST   @>0006(@>5A),@>834A   get read ptr
+       DST   @>834A,@>8350    make a copy
+       DINC  @>834A           plus one
+       CLR   @>834E           keep only # of chars to write
+       DADD  @>834E,@>834A    new ptr
+       DCH   @>835C,@>834A    compare to mem size
+       BS    G@G61C0          "memory full" error
+       DST   @>834A,@>0006(@>5A)   set read ptr
+       DST   @>834A,@>0004(@>5A)   set write ptr
+       DADD  @>835A,@>8350    make it an address
+       DADD  >0008,@>8350     skip header
+       ST    @>834F,@>0000(@>50)   pass size byte
+       DINC  @>8350           increment pointer
+       BR    G@G6340          copy the record
+ 
+G6304  ST    @>834E,@>834F    fix: # of chars is rec len
+       CLR   @>834E           make it a word
+       AND   >7F,@>8350
+       DST   @>8350,@>834A    get record #
+** EPEP       DMPY  @>834E,@>8350    calculate total byte offset
+       DMUL  @>834E,@>8350    calculate total byte offset
+       DCZ   @>8350           check for overflow
+       BR    G@G61C0          "memory full" error
+       DST   @>8352,@>8350    current char ptr
+       DADD  @>834E,@>8352    new char ptr
+* EPEP       CAR                    check for overflow
+       CARRY                  check for overflow
+       BS    G@G61C0          "memory full" error
+       DCH   @>835C,@>8352    compare to memory size
+       BS    G@G61C0          "memory full" error
+       DINC  @>834A           next record
+       DCH   @>0004(@>5A),@>834A
+       BR    G@G6334
+       DST   @>834A,@>0004(@>5A)   bring back write ptr, if needed
+G6334  DADD  >0008,@>8350     skip header
+       DADD  @>835A,@>8350    make it an address
+       DINC  V@>FFFC(@>58)    increment rec # in PAB
+G6340  CZ    @>834F           # of chars to write
+       BS    G@G634C          none
+       MOVE  @>834E,V*>834C,@>0000(@>50)  copy them from data buffer
+G634C  BR    G@G61DE          return to caller
+*
+*------------------------------------
+* Opcode 4: Rewind
+*------------------------------------
+G634E  CLOG  >10,@>834B       var/fix?
+       BR    G@G635E          var
+       DST   V@>FFFC(@>58),@>0006(@>5A)   fix: set record #
+       BR    G@G61DE          return to caller
+ 
+G635E  DCLR  @>0006(@>5A)     var: to top of "file"
+       BR    G@G61DE          return to caller
+*
+*------------------------------------
+* Opcode 5: Load
+*------------------------------------
+G6365  DCEQ  >5AA5,@>0000(@>5A)    check if flag is present
+       BR    G@G61D0               "file error"
+       CEQ   >FF,@>0002(@>5A)      flag for "program" type
+       BR    G@G61D0               mismatch: "file error"
+       DST   @>835A,@>834A         memory address
+       DADD  >0008,@>834A          skip header
+       DCH   @>8350,@>0004(@>5A)   check max # of bytes to load
+       BS    G@G61C0               too big: memory full
+       DST   @>0004(@>5A),@>834E   write ptr (i.e. eof offset)
+       MOVE  @>834E,@>0000(@>4A),V*>834C  copy to dat buffer area
+       BR    G@G61DE               return to caller
+*
+*------------------------------------
+* Opcode 6: Save
+*------------------------------------
+G6395  DCH   @>835C,@>8350    is there room enough in this memory?
+       BS    G@G61C0          no: memory full
+       DCEQ  >5AA5,@>0000(@>5A)    flag found?
+       BS    G@G63A6          yes
+       CALL  G@G646B          no: init memory
+** EPEP commented the following       
+G63A6  DST   @>835A,@>834A    ; EP Dest RAM address to 834A (0x7000)
+       DADD  >0008,@>834A     ; EP add 8 to it
+       ST    >FF,@>0002(@>5A) ; Store FF to address dest RAM+2
+       DST   @>8350,@>0004(@>5A) ; Store length at >8350 to dest RAM+4
+       MOVE  @>8350,V*>834C,@>0000(@>4A) ; Move from VDP RAM pointed to be 834C to system RAM pointed to by 834A
+       BR    G@G61DE
+*
+*------------------------------------
+* Opcode 9: Status
+*------------------------------------
+G63C3  CLR   @>834A           reset all flags
+       DCEQ  >5AA5,@>0000(@>5A)    check if memory is in use
+       BR    G@G642B               no: return
+       ST    @>0002(@>5A),@>834B   get file type from header
+       CEQ   >FF,@>834B       is it "program"?
+       BR    G@G63DE          no
+ 
+G63D9  ST    >08,@>834A       yes: set "program" bit
+       BR    G@G642B          and return
+ 
+G63DE  ST    @>834B,@>834A    non-program: copy file type
+       AND   >08,@>834A       keep only dis/int
+       AND   >10,@>834B       keep only fix/var
+       SLL   >01,@>834A       move to corresponding bit in status byte
+       SRL   >02,@>834B
+       OR    @>834B,@>834A    combine them
+       CLOG  >04,@>834B       fix/var?
+       BR    G@G641D          var
+       DINC  @>8350           fix: next record
+       ST    @>0003(@>5A),@>834F   get rec len from header
+       CLR   @>834E           make it a word
+       DST   @>8350,@>834C    save rec #
+* EPEP      DMPY  @>834E,@>8350    calculate byte #
+       DMUL  @>834E,@>8350    calculate byte #
+       DCZ   @>8350           overflow?
+       BR    G@G640E          yes
+       DCH   @>835C,@>8352    compare to memory size
+       BR    G@G6413          ok
+G640E  OR    >02,@>834A       set "memory full" bit
+       BR    G@G641B          done
+G6413  DCH   @>0004(@>5A),@>834C   compare byte # to offset in header
+       BS    G@G6428          set "eof" bit
+G641B  BR    G@G642B          done
+ 
+G641D  DCHE  @>0004(@>5A),@>0006(@>5A)    var: are read + write offset identical?
+       BR    G@G642B          no
+G6428  OR    >01,@>834A       yes: set "eof" bit
+ 
+G642B  ST    @>834A,V@>FFFE(@>58)  return result in PAB+8
+       BR    G@G61DE          return to caller
+*
+*------------------------------------
+* Opcode 7: Delete
+*------------------------------------
+G6433  DCEQ  >5AA5,@>0000(@>5A)    check flag
+       BR    G@G6469          no file in memory: return right away
+G643C  DCLR  @>0000(@>5A)     remove the flag
+       DCEQ  >A55A,@>7000     is loader in mini-memory?
+       BR    G@G6469          no: done
+       DCEQ  >2000,@>835A     yes: are we accessing low mem?
+       BR    G@G645D          no
+G644F  DST   >2000,@>7022     low mem: restore FSTLOW
+       DST   >3FFF,@>7024     and LSTLOW
+       BR    G@G6469          done
+G645D  DST   >A000,@>7026     high mem: restore FSTHIGH
+       DST   >FFE0,@>7028     and LSTHIGH
+G6469  BR    G@G61DE
+*
+*------------------------------------
+* Init memory header, if needed
+*------------------------------------
+G646B  DCEQ  >7000,@>835A     are we accessing minimem?
+       BS    G@G6491          yes: go ahead
+       DCEQ  >A55A,@>7000     no: is loader in mini-memory?
+       BR    G@G6491          no: go ahead
+       DST   >7022,@>834A     yes: pt to FSTHI *** BUG: >834B lost ***
+       DCEQ  >2000,@>835A     are we accessing low mem?
+       BR    G@G6487          no
+       DADD  >0004,@>835A     yes: pt to FSTLO *** BUG: should be >834A ***
+G6487  DCLR  @>0000(@>4A)     reset loader pointers
+       DCLR  @>0002(@>4A)
+G6491  DST   >5AA5,@>0000(@>5A)    save flag
+       DCLR  @>0006(@>5A)     reset write ptr
+       DCLR  @>0004(@>5A)     reset read ptr
+       CZ    @>834E           rec len = 0?
+       BR    G@G64AF          no
+       ST    >50,@>834E       yes: default it 80
+       ST    @>834E,V@>FFFA(@>58)  pass it to PAB
+G64AF  ST    @>834E,@>0003(@>5A)   save rec len into header
+       ST    @>834B,@>834A    get file type (if not lost above!)
+       AND   >18,@>834A       keep only file type
+       ST    @>834A,@>0002(@>5A)   save it into header
+       RTN
+*
+*==================================
+* Subprograms to be called from Basic
+*==================================
+ 
+*------------------------------------
+* INIT subprogram
+*
+* Check for memory expansion, set loader's pointers
+*------------------------------------
+G64C2  OR    >08,@>8348       set flag
+       DADD  >0005,@>832C     skip subprogram name (i.e. LINK + size byte)
+       CALL  G@G64CF          clear RAM, init loader ptrs
+       B     G@G674E          return to basic
+*
+*------------------------------------
+* Init the loader's pointers
+*------------------------------------
+G64CF  DCLR  @>7000           erase the whole RAM
+       MOVE  >0FFF,@>7000,@>7001
+       DST   >A55A,@>7000     set a flag
+       DST   >7022,@>834A     UTLTAB pointer
+       ST    @>A000,@>834C    check if memory expansion is here
+       INV   @>834C
+       ST    @>834C,@>A000    by writing a value to it
+       CEQ   @>834C,@>A000    and reading it back
+       BR    G@G651B          no memory expansion
+       DST   >A000,@>0000(@>4A)    set FSTHI
+       DINCT @>834A
+       DST   >FFE0,@>0000(@>4A)    set LSTHI
+       DINCT @>834A
+       DST   >2000,@>0000(@>4A)    set FSTLOW
+       DINCT @>834A
+       DST   >3FFF,@>0000(@>4A)    set LSTLOW
+G651B  DST   >701C,@>834A
+       DST   >7118,@>0000(@>4A)    set FSTMOD
+       DINCT @>834A
+       DST   >8000,@>0000(@>4A)    set LSTMOD
+       RTN
+*
+*------------------------------------
+* Skip subprogram name in basic statement
+*------------------------------------
+G6530  CLR   @>834A
+       ST    V*>832C,@>834B   get current token (subprogram name length)
+       DADD  @>834A,@>832C    update token ptr
+       DINC  @>832C           plus the size byte itself
+       XML   >1B              get next token
+       CEQ   >B7,@>8342       is it (?
+       BR    G@G6DA5          no: incorrect statement
+       XML   >1B              get next token
+       RTN
+*
+*------------------------------------
+* LOAD and POKEV subprograms
+*
+* Place values in CPU or VDP memory.
+* LOAD can also load a DF80 tagged object file.
+*------------------------------------
+G6545  OR    >01,@>8348       POKEV entry point
+       BR    G@G654F          to common part
+*
+G654A  DCLR  @>8348           LOAD entry point
+       OR    >08,@>8348       set flag
+G654F  CALL  G@G6530          skip program name in Basic statement
+* EPEP PARS -> PARSE G6552  PARS  >B6              parse statement upto ) at the latest
+G6552  PARSE  >B6              parse statement upto ) at the latest
+       CEQ   >65,@>834C       string variable encountered?
+       BS    G@G6594          yes: load a file
+       XML   >12              no: convert float to integer
+       CEQ   >03,@>8354       overflow error occured?
+       BS    G@G6DB9          yes: announce it
+       DST   @>834A,@>8304    save address to load at
+G6563  CEQ   >B3,@>8342       current token is , ?
+       BR    G@G6749          no: then we are done
+       XML   >1B              yes: get next token
+       PARSE  >B6              parse Basic statement for next parameter
+       CEQ   >65,@>834C       string variable?
+       BR    G@G6577          no: address to load at
+       DCZ   @>8350           yes: is it an empty string?
+       BS    G@G65C9          yes: separator for new address
+       BR    G@G6DC3          no: error, can't load a file now
+G6577  XML   >12              convert float to integer
+       CEQ   >03,@>8354       overflow error occured?
+       BS    G@G6DB9          yes: announce it
+       CLOG  >01,@>8348       VDP flag set?
+       BS    G@G6589          no
+       ST    @>834B,V*>8304   yes: write byte to VDP memory
+       BR    G@G658F
+G6589  ST    @>834B,@>0000(@>04)   write byte to CPU memory
+G658F  DINC  @>8304           next address
+       B     G@G6563          get next byte, if any
+ 
+G6594  DCZ   @>8350           load a file
+       BS    G@G65C9          empty name: error
+       CLOG  >01,@>8348       VDP flag?
+       BR    G@G6DBE          error: POKEV cannot load files
+       DST   @>8350,@>830C    name size
+       DADD  >005A,@>830C     plus PAB size (10), plus data buffer size (80)
+       XML   >17              put it on value stack
+       CALL  G@>0038          assign space for string
+       XML   >18              pop value from stack
+       CALL  G@G6C0D          clear 70 bytes
+       CALL  G@G6BD2          copy filename
+       ST    >60,V@>0008(@>1C)     set screen offset in PAB+8
+       ST    >04,V@>0001(@>1C)     set file type as DF+input in PAB+1
+       DADD  @>831C,@>8350    skip name
+       DADD  >000A,@>8350     skip PAB
+       DST   @>8350,V@>0002(@>1C)  this will be the data buffer area
+       BR    G@G68AA          proceed with loading
+ 
+G65C9  CEQ   >B3,@>8342       is current token a , ?
+       BR    G@G6749          no: then we are done
+       XML   >1B              yes: get next token
+       BR    G@G6552          and keep loading files (or data)
+*
+*------------------------------------
+* PEEK and PEEKV subprograms
+*
+* Retreive values from CPU or VDP memory
+*------------------------------------
+G65D2  OR    >01,@>8348       PEEKV entry point
+       BR    G@G65D9          to common part
+*
+G65D7  DCLR  @>8348           PEEK entry point
+G65D9  CALL  G@G6530          skip subprogram name in Basic statement
+G65DC  PARSE  >B6              parse statement for next parameter
+       CEQ   >65,@>834C       is it a string?
+       BS    G@G6600          yes
+       XML   >12              no: convert float to integer
+       CEQ   >03,@>8354       overflow occured?
+       BS    G@G6DB9          yes: issue error
+       DST   @>834A,@>8304    no: save integer as address to read from
+       CEQ   >B3,@>8342       is next token a , ?
+       BR    G@G6749          no: then we are done
+G65F2  XML   >1B              yes: get next token
+       CEQ   >C7,@>8342       is it a quoted string?
+       BR    G@G660D          no
+       PARSE  >B6              yes: parse it
+       CEQ   >65,@>834C       string variable?
+       BR    G@G660D          no
+ 
+G6600  DCZ   @>8350           string parameter: is it empty?
+       BR    G@G6DBE          no: error
+       CEQ   >B3,@>8342       yes: separator. Is next token a , ?
+       BR    G@G6749          no: then we are done
+       XML   >1B              yes: get next token
+       BR    G@G65DC          and parse for an address
+ 
+G660D  CHE   >80,@>8342       is next token an reserved word?
+       BS    G@G6749          yes: we are done
+       XML   >13              no, it's a variable name: find it in symbol table
+       XML   >14              get its entry in the value stack
+       XML   >17              copy it to the value stack
+       CLOG  >01,@>8348       VDP or CPU memory?
+       BS    G@G6623          CPU
+       ST    V*>8304,@>835D   VDP: get 1 byte
+       BR    G@G6629
+G6623  ST    @>0000(@>04),@>835D   CPU: get 1 byte
+G6629  CALL  G@G6757          clear FAC (>834A-8351)
+       CZ    @>835D           is byte 0 ?
+       BS    G@G6649          yes: then we are done (float 0 is >0000....)
+       ST    >40,@>834A       init exponent
+       CLR   @>835C           make byte a word
+       DIV   >64,@>835C       divide by 100
+       ST    @>835C,@>834B    quotient
+       ST    @>835D,@>834C    remainder
+       CZ    @>834B           smaller than 100?
+       BR    G@G6647          no
+       EX    @>834B,@>834C    yes: result in >834C
+       BR    G@G6649
+G6647  INC   @>834A           greater than 100: raise exponent
+G6649  XML   >15              assign this value to the variable
+       CEQ   >B3,@>8342       is next token a , ?
+       BR    G@G6749          no: then we are done
+       DINC  @>8304           yes: next address
+       B     G@G65F2          keep parsing for variables where to put bytes
+*
+*------------------------------------
+* LINK subprogram
+*
+* Run a program called by name, handle parameter passing
+*------------------------------------
+G6655  OR    >08,@>8348       set flag
+       CALL  G@G6530          skip subprogram name (i.e. LINK)
+       DCEQ  >A55A,@>7000     are assembly subroutine in minimem RAM?
+       BR    G@G6DA0          no: error
+       OR    >08,@>8348       set flag again
+       DST   @>836E,@>8310    save value stack pointer (for called program)
+       PARSE  >B6              parse for a parameter (i.e. entry point label)
+       CEQ   >65,@>834C       string param?
+       BR    G@G6DBE          no: error
+       CH    >06,@>8351       is name longer than 6 chars?
+       BS    G@G6DC3          yes: error
+       XML   >17              push it on value stack
+       CLR   @>8312           number of parameters passed to the called program
+       DST   >ED02,@>8316     will be stored at >7002 (GPL adds >8300 to addres)
+G667D  CEQ   >B6,@>8342       is next token a ) ?
+       BS    G@G671F          yes: we are done
+       CEQ   >B3,@>8342       is next token a , ?
+       BR    G@G6DA5          yes
+       DST   @>832C,@>8322    save Basic statement pointer
+       XML   >1B              get next token
+       CHE   >80,@>8342       is it a reserved word?
+       BS    G@G66E2          yes
+       CALL  G@G6757          no
+       XML   >13              get its entry from symbol table
+       CLOG  >40,V*>834A      user defined function?
+       BR    G@G66E2          no
+       CEQ   >B3,@>8342       is next token a , ?
+       BS    G@G66FB          yes
+       CEQ   >B6,@>8342       is next token a ) ?
+       BS    G@G66FB          yes
+       CEQ   >B7,@>8342       is next token a ( ?
+       BS    G@G66B2          yes: array element
+       CHE   >80,@>8342       is next token a reserved word?
+       BS    G@G66E2          yes
+       BR    G@G6DA5          none of these: incorrect statement
+ 
+G66B2  XML   >1B              array element: get next token
+       CEQ   >B6,@>8342       is it a ) ?
+       BS    G@G66C5          yes: done with array
+       CEQ   >B3,@>8342       is it a , ?
+       BS    G@G66B2          yes: one more dimension
+       DDEC  @>832C           back to previous token
+       ST    >B7,@>8342       make it a (
+       BR    G@G66FB          treat it as a variable
+ 
+G66C5  XML   >1B              get next token
+       CLOG  >80,V*>834A      string param?
+       BR    G@G66D4          no
+       ST    >04,@>8300(@>16)      save param type: numeric array
+       BR    G@G66D9
+G66D4  ST    >05,@>8300(@>16)      string array type
+G66D9  DST   @>834A,@>834E    entry in symbol table
+       DADD  >0006,@>834E     value in symbol table (ptr for strings)
+       BR    G@G6712          put param on stack
+ 
+G66E2  DST   @>8322,@>832C    restore Basic statement ptr
+       XML   >1B              restore next token
+       PARSE  >B6              keep parsing for params
+       CEQ   >65,@>834C       string param?
+       BR    G@G66F5          no
+       ST    >01,@>8300(@>16)      save param type: string constant
+       BR    G@G66F9
+G66F5  CLR   @>8300(@>16)     type 0:
+G66F9  BR    G@G6712          put patam on stack
+ 
+G66FB  XML   >14              get symbol value
+       CHE   >B8,@>8342       is next token a & ?
+       BS    G@G66E2          yes: concatenate strings
+       CZ    @>834C           numeric variable?
+       BR    G@G670D          no
+       ST    >02,@>8300(@>16)      save type: numeric variable
+       BR    G@G6712
+G670D  ST    >03,@>8300(@>16)      save type: string variable
+G6712  INC   @>8312           increment param count
+       CH    >10,@>8312       max is 16
+       BS    G@G6DC3          too many
+       DINC  @>8316           param type list pointer
+       XML   >17              save param entry on value stack
+       BR    G@G667D          keep parsing
+ 
+G671F  AND   >DF,@>8349       remove flag
+       ST    >20,@>834A       space character
+       MOVE  >0005,@>834A,@>834B   blank >834A-834F
+       MOVE  >0004,V@>000C(@>10),@>8300   entry for program name parameter
+       DCZ   @>8302           no name!
+       BS    G@G6912          start program
+       MOVE  @>8302,V*>8300,@>834A        copy name to FAC
+       DST   @>8302,@>8350    name size
+       BR    G@G6912          start program
+*
+*------------------------------------
+* Return from program
+*------------------------------------
+G673F  DCH   @>8310,@>836E    all params removed from stack?
+       BR    G@G6749          yes
+       XML   >18              no: remove one more
+       B     G@G673F          try again
+G6749  CEQ   >B6,@>8342       is current token a ) ?
+       BR    G@G6DA5          no: incorrect statement
+G674E  XML   >1B              next token
+       CZ    @>8342           is next token >00 (end of statement)?
+       BR    G@G6DA5          no: error
+       CALL  G@>0012          return to basic
+*
+*------------------------------------
+* Clear FAC >834A-8351
+*------------------------------------
+G6757  CLR   @>834A
+       MOVE  >0007,@>834A,@>834B
+       RTN
+*
+       COPY 'mmg2.gpl'
+       COPY 'mmg3.gpl'
+       COPY 'strange.gpl'
+*
+*
+
