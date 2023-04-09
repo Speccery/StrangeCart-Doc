@@ -4,6 +4,12 @@ StrangeCart project public documentation.
 Please see the [Wiki](https://github.com/Speccery/StrangeCart-Doc/wiki) for more information.
 
 ## News
+
+# 2023-04-09
+After a very long last new firmware release.
+
+Please note that this has not been tested much yet, so proceed with caution.
+
 # 2022-08-13
 Released new firmware to support the Bad Apple Demo running on the real iron.
 The corresponding new flash image file for the external flash chip is also provided in this repository with the name: flash_image-bad-apple.bin
