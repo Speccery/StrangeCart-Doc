@@ -6,9 +6,9 @@ Please see the [Wiki](https://github.com/Speccery/StrangeCart-Doc/wiki) for more
 ## News
 
 # 2023-04-09
-After a very long last new firmware release.
+After a very long last a new firmware release. My intention is to keep on improving the firmware, now that I again continued to work on the code.
 
-Please note that this has not been tested much yet, so proceed with caution.
+Please note that this has not been tested much yet, so proceed with caution. What else is new...
 
 # 2022-08-13
 Released new firmware to support the Bad Apple Demo running on the real iron.
@@ -27,21 +27,22 @@ The StrangeCart project started way back in May 2020, when I started this discus
 
 https://atariage.com/forums/topic/306889-strangecart/
 
-## What is the StrangeCart
-The project started as an experiment for the TI-99/4A home computer, first released in 1979: I wanted to both create a hardware cartridge for the TI-99/4A and wanted to make it simultaneously super flexible but also electronics wise very simple, essentially a single chip cartridge. The enabling technology for this idea was to use a relatively fast ARM based microcontroller (MCU) as the main chip, and to implement cartridge functionality in software.
+## What is the StrangeCart?
+The project started as an experiment for the TI-99/4A home computer, first released in 1979. I wanted to both create a hardware cartridge for the TI-99/4A and to make it simultaneously super flexible - but also electronics wise very simple, essentially a single chip cartridge. The enabling technology for this idea was to use a relatively fast ARM based microcontroller (MCU) as the main chip, and to implement cartridge functionality in software.
 
-Due to the software implementation, the cartridge and implement virtually all types of TI-99/4A cartridges in software, including the following features:
+Due to the software implementation, the cartridge can implement virtually all types of TI-99/4A cartridges in software, including the following features:
 - ROM memory support
-- GROM memory support (this is a TI specific slow but cheap at the time ROM chip)
+- GROM memory support (this is a TI specific ROM chip type, slow but cheap at the time, and also used to enforce vendor lock in)
 - Banked ROM memory support
-- Combined ROM and RAM support
+- Combined ROM and RAM support (minimemory cartridge)
 - System GROM override support
 
-In addition to those features, which existed also back in the hayday of the TI-99/4A, in the early 1980s - but not in a single cartridge, the StrangeCart also implements features which I don't think have been implemented before. The become possible due to coprosessing support, enabling the StrangeCart to run software in parallel to the TI-99/4A's main CPU. As examples of this, there are currently implemented:
-- A couple of simple demos, running on the ARM but displaying all output on the TI's screen
-- On board BASIC interpreter, implementing a most of the features of the original TI BASIC. Instead of running on the 3MHz CPU of the TI-99/4A in a double interpreter setup, the Basic is implemented in C++ running natively on the ARM. This makes the Basic up to a 1000 times faster from the original TI Basic
-- Emulator of the TI-99/4A running on the StrangeCart. Yes, this is a bit strange. The point is that the StrangeCart can run TI software under emulation faster than the original TI-99/4A. At the time of writing the emulator works, but since input and output is not yet integrated with the home computer, this is still work in progress.
+In addition to those features, which existed also back in the hayday of the TI-99/4A, in the early 1980s (but not in a single cartridge), the StrangeCart also implements features which I don't think have been done before. These become possible due to coprosessing support, enabling the StrangeCart to run software in parallel to the TI-99/4A's main CPU. Some examples are currently implemented:
 
+- On-board BASIC interpreter, implementing a most of the features of the original TI BASIC. Instead of running on the 3MHz CPU of the TI-99/4A in a doubly interpreted fashion, the Basic is implemented in C++ running natively on the ARM. This makes the Basic up to a 1000 times faster from the original TI Basic.
+- Limited support for huge cartridges, up to 8 megabytes. The support is limited in that predictive memory paging is being used, and it does not work for all content. 
+- A couple of simple demos, running on the ARM but displaying all output on the TI's screen. The Basic implementation has really taken the lead in my development in this project, and these early demos have remained just that, early demos. 
+- Emulator of the TI-99/4A running on the StrangeCart. Yes, this is a bit strange. The point is that the StrangeCart can run TI software under emulation faster than the original TI-99/4A. At the time of writing the emulator works, but since input and output is not yet integrated with the home computer, this is still work in progress. This was more of a test to see what could be done.
 
 ## Technical background
 This is what I wrote in the opening message at the AtariAge thread: *The microcontroller has two ARM processor cores: one Cortex M0+ core and one Cortex M4F core. I am running them at 96 MHz. In my opinion the really cool thing about this setup and my proof-of-concept software is that the less powerful M0+ core alone is sufficient to serve the bus of the TI-99/4A in real time, leaving the M4F core free for other things. The two cores can communicate via shared memory.*
