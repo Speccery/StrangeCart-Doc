@@ -83,15 +83,20 @@ Commands are implemented by writing a 16 byte string of bytes to GROM space addr
 **The return values have not been tested much.** After a command is run, the status is returned in the same area, i.e. at 5FF0 in the GROM space.Basically the format is as follows:
 - 5FF0 & 5FF1: The ascii characters 'OK'
 - 5FF2 "main" return code, typically 1 for success, 0 for failure. **untested**
+- 5FF3 Currently active ROM bank (0,1,2 or 8)
+- 5FF4 GRAM shadow mode (0 or 1)
 
-The version query command returns 8 bytes as follows, from 5FF0 onwards:
+The version query command returns nearly 16 bytes as follows, from 5FF0 onwards:
 - 5FF0 & 5FF1: 'OK'
-- 5FF2 major version
-- 5FF3 minor version
-- 5FF4 build number
-- 5FF5 Year of build (last two digits,i.e. 23 for 2023)
-- 5FF6 Month of build (1..12)
-- 5FF7 Day of month of build (1..31)
+- 5FF2 Return code
+- 5FF3 Currently active ROM bank (0,1,2 or 8)
+- 5FF4 GRAM shadow mode (0 or 1)
+- 5FF8 major version
+- 5FF9 minor version
+- 5FFA build number
+- 5FFB Year of build (last two digits,i.e. 23 for 2023)
+- 5FFC Month of build (1..12)
+- 5FFD Day of month of build (1..31)
 Setting of these values is not yet automated.
 
 ### GPL command example code
