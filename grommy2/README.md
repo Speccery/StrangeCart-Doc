@@ -1,6 +1,16 @@
 # grommy2 README
 Erik Piehl (C) 2023-11-19
 Project started in 2022.
+
+### version 0.7.21
+Updated 2024-07-24 to reflect version 0.7.21. This version fixed the firmware flash command 06, which was broken in earlier versions. The new version still has not been tested much. Main changes:
+- Locked GRAM area to address 0x20003000 on the ARM side.
+- Command 7: Added execution mode option to command 7 (run ARM code from main loop).
+- Command 7: Forces bit 0 of execution address to 1 to ensure marking the code as Thumb code.
+- Command 6: Firmware update command 6 fixed. Needs more testing but appears to work.
+- If the serial port of the grommy2 is connected to a terminal, some status information can be seen. Added a couple of commands which can be issued with a terminal program.
+- Reduced the memory footprint of the firmware, and decided to make the firmware software max size 16 kilobytes. Current size is under 14 kilobytes, with room for additional reduction. The firmware can be pretty easily made smaller by not using the STM32 library code as is, but instead make versions having only the functionality needed by the grommy2.
+
 ## grommy2 board introduction
 The grommy2 board is a modern replacement for the special GROM chips used by the TI-99/4A home computers. The GROM chips contain most of the operating system of the TI-99/4A and the BASIC interpreter. The GROM chips contain byte code in a language called GPL, explained [here](https://www.unige.ch/medecine/nouspikel/ti99/gpl.htm).
 
@@ -48,14 +58,25 @@ The microcontroller is a very capable low cost chip. It has 128k of flash memory
 
 ### Flash ROM usage
 The flash ROM usage is at the moment built from four 24k blocks:
-- firmware block
-- default GROM block
+- firmware block (size 16k)
+- default GROM block (starts from 0x08004000)
 - user GROM #1
 - user GROM #2
-- Unused area, 128k - 4*24k = 32k
+- Unused area, 128k - 16k - 3*24k = 40k
 
 ### Serial port
 UART1 of the microcontroller is used for some debugging features. It communicates at 115200bps 8N1.
+It also supports some commands which can be issued by a terminal program, here functionality as version 0.7.21.
+| Command | Function |
+| --- | --- |
+| s | Show number of characters received by the serial port, and counts of GROM reads and writes. |
+| r | Reset bank number to zero (system GROM) and turn off shadow memory. |
+| d | Hexdump the beginning of a few key areas of memory |
+| l | Flash the LED quickly 10 times |
+| xy | Execute code at offset 0x4000 in the GRAM buffer |
+| xz | Execute code at offset 0x0000 in the GRAM buffer |
+| v | Show version number of the firmware |
+
 
 ### Interrupts
 Handling of GROM traffic is interrupt driven, not polled. This makes software development for the ARM core easier. Currently the main loop runs with interrupts enabled and just handles some debug output as well as responses to a few single character long serial port commands.
@@ -93,7 +114,7 @@ The version query command returns nearly 16 bytes as follows, from 5FF0 onwards:
 - 5FF4 GRAM shadow mode (0 or 1)
 - 5FF8 major version
 - 5FF9 minor version
-- 5FFA build number
+- 5FFA build number (two digits)
 - 5FFB Year of build (last two digits,i.e. 23 for 2023)
 - 5FFC Month of build (1..12)
 - 5FFD Day of month of build (1..31)
@@ -155,16 +176,16 @@ p3 -> 5FF3 p3 Not used for this command
 Once the final byte is written, the Y of the string, the command is checked and executed if valid.
 
 Below p4..p7 are additional paramaters, which mostly are zero and marked as 0* if all of them a zero. They are followed with the string 'EPGROMMY'.
-| Command | p2 | p3 | p4..p7 | Description | Tested |
-| --- | --- | --- | --- | --- | --- |
-| 00 FF | 00 | 00 | 0* | Query grommy2 version | Yes |
-| 01 FE | p2 | 00 | 0* | Select GROM read bank p2=0,1,2 or 8 | Yes |
-| 02 FD | p2 | 00 | 0* | Copy bank p2=0,1 or 2 to GRAM i.e. bank 8 | Yes |
-| 03 FC | p2 | 00 | 0* | Shadow RAM mode on (p2=1) or off (p2=0). When shadow RAM is on, writes to GROM area go to the shadow RAM i.e. bank 8 | Yes |
-| 04 FB | p2 | 3F | 0* | Program flash bank 1 (p2=1) or flash bank 2 (p2=2) with the contents of GRAM i.e. bank 8. p3 is a bit mask which chooses which 4k pages are programmed. The value of 3F chooses all six 4k pages making up the 24k area. Bit 0 (LSB) controls writes to 0..FFF, bit 1 to 1000..1FFF and so on. | Yes |
-| 05 FA | p2 | 00 | 0* | Compare GRAM with flash bank 0,1 or 2 depending p2 | No |
-| 06 F9 | 12 | 34 | 0* | Program new firmware with the contents of GRAM i.e. bank 8 | No |
-| 07 F8 | lo | hi | 0* | Execute contents of GRAM from offset hi:lo as ARM Cortex M0 code | No |
+| Command | p2 | p3 | p4 | p5..p7 | Description | Tested |
+| --- | --- | --- | --- | --- | --- | --- |
+| 00 FF | 00 | 00 | 0 | 0* | Query grommy2 version | Yes |
+| 01 FE | p2 | 00 | 0 | 0* | Select GROM read bank p2=0,1,2 or 8 | Yes |
+| 02 FD | p2 | 00 | 0 | 0* | Copy bank p2=0,1 or 2 to GRAM i.e. bank 8 | Yes |
+| 03 FC | p2 | 00 | 0 | 0* | Shadow RAM mode on (p2=1) or off (p2=0). When shadow RAM is on, writes to GROM area go to the shadow RAM i.e. bank 8 | Yes |
+| 04 FB | p2 | 3F | 0 | 0* | Program flash bank 1 (p2=1) or flash bank 2 (p2=2) with the contents of GRAM i.e. bank 8. p3 is a bit mask which chooses which 4k pages are programmed. The value of 3F chooses all six 4k pages making up the 24k area. Bit 0 (LSB) controls writes to 0..FFF, bit 1 to 1000..1FFF and so on. | Yes |
+| 05 FA | p2 | 00 | 0 | 0* | Compare GRAM with flash bank 0,1 or 2 depending p2 | No |
+| 06 F9 | 12 | 34 | 0 | 0* | Program new firmware with the contents of GRAM i.e. bank 8 | Yes |
+| 07 F8 | lo | hi | M | 0* | Execute contents of GRAM from offset hi:lo as ARM Cortex M0 code. p4 chooses execution mode, when set to 0 the code is executed immediately, same as for older firmware versions. Version 0.7.21 allows this to be set to 1, in which case the code will not be executed immediately (from interrupt context) but rather from the main program outside of interrupt context. If execution is done outside of interrupt context, it is not possible to set return value reliably. | Yes |
 
 ### Access from modified version of Easybug
 I have a version of the Mini Memory cartridge which has some modifications:
