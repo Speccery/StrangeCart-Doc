@@ -5,6 +5,9 @@ Please see the [Wiki](https://github.com/Speccery/StrangeCart-Doc/wiki) for more
 
 ## News
 
+# 2025-01-01
+Happy new year! I uploaded a new firmware version, dated 2024-12-31. This has a lot of new features but needs to be considered as alpha version code. Still the best version of the firmware in my opinion. The major updates are Extended Basic compatibility (not complete yet but starting to be useful).
+
 # 2023-04-09
 After a very long last a new firmware release. My intention is to keep on improving the firmware, now that I again continued to work on the code.
 
